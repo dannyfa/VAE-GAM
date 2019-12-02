@@ -11,7 +11,7 @@ import nibabel as nib
 class FMRIDataset(Dataset):
     """This is a slightly different version from Rachel's original """
     def __init__(self, csv_file, transform= None):
-        self.df = pd.read_csv(csv_file) # see if good to specify dtypes here
+        self.df = pd.read_csv(csv_file)
         self.transform = transform
     def __len__(self):
         """Return the number of samples in dset"""
@@ -39,7 +39,7 @@ class FMRIDataset(Dataset):
         nii = self.df.iloc[idx,3]
         vol_num = self.df.iloc[idx,2]
         fmri = np.array(nib.load(nii).dataobj)
-        fmri_norm = np.true_divide(fmri, maxsig) # check if ok
+        fmri_norm = np.true_divide(fmri, maxsig)
         volume = fmri_norm[:,:,:,vol_num]
         sample = {'subjid': subjid, 'volume': volume, 'one_hot': one_hot,
                       'age': age, 'sex': sex, "task":task}
@@ -50,7 +50,7 @@ class FMRIDataset(Dataset):
 
 class ToTensor(object):
     "Concatenates input array and converts sample arrays to tensors"
-    
+
     def __call__(self, sample):
         subjid, volume, id_vector, age, sex, task = sample['subjid'], sample['volume'], sample['one_hot'], sample['age'], sample['sex'], sample['task']
         concat = np.append(id_vector, age)
@@ -60,9 +60,10 @@ class ToTensor(object):
                 'volume': torch.from_numpy(volume),
                 'subjid': subjid}
 
-def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file='/home/dfd4/fmri_vae/preproc_dset.csv'):
-    # Setup the train loaders.
-    #Set up num workers to zero for run time error 
+def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file='/home/dfd4/fmri_vae/resampled/preproc_dset.csv'):
+    #Set num workers to zero to avoid runtime error msg.
+    #This might need further looking into when we use larger dsets.
+    #Setup the train loaders.
     train_dataset = FMRIDataset(csv_file = csv_file, transform = ToTensor())
     train_loader = DataLoader(train_dataset, batch_size=batch_size, \
                               shuffle=shuffle[0], num_workers=0)

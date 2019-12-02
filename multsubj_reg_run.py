@@ -16,7 +16,7 @@ import vae_reg # new z-less model
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')
 
-parser.add_argument('--csv_file', type=str, metavar='N', default='/home/dfd4/fmri_vae/preproc_dset.csv', \
+parser.add_argument('--csv_file', type=str, metavar='N', default='/home/dfd4/fmri_vae/resampled/preproc_dset.csv', \
 help='Full path to csv file with raw dset to used by DataClass and loaders. This is created by the pre_proc script.')
 parser.add_argument('--save_dir', type=str, metavar='N', default='', \
 help='Dir where latent projection maps and recon files are saved to. Defaults to saving files in current dir.') # needs try out
@@ -35,10 +35,12 @@ args = parser.parse_args()
 torch.manual_seed(args.seed)
 
 #set up saving directory specs
+if args.save_dir =='':
+	args.save_dir = os.getcwd()
 if args.save_dir != '' and not os.path.exists(args.save_dir):
 	os.makedirs(args.save_dir)
 else:
-	args.save_dir = os.getcwd()
+	pass
 
 if __name__ == "__main__":
 	main_start = time.time()

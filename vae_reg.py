@@ -24,7 +24,7 @@ import umap
 import os
 import itertools
 
-IMG_SHAPE = (112,112,64)
+IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
@@ -68,7 +68,8 @@ class VAE(nn.Module):
 		#self.fc43 = nn.Linear(50, self.z_dim)
 
 		#Decoder
-		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be n+k. Here should be 6 - 3 subjs  + 3 covariates
+		# In future, implement more flexibility when choosing nn params
+		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be n+k. Here should be 6 - 3 subjs + 3 covariates
 		self.fc6 = nn.Linear(50, 100)
 		self.fc7 = nn.Linear(100, 200)
 		self.fc8 = nn.Linear(200, 2*self.nf*6*8*5)
@@ -124,7 +125,8 @@ class VAE(nn.Module):
 		#return mu, u, d
 
 	def decode(self, x_in):
-		h = F.relu(self.fc5(x_in.float())) #added .float() piece here 
+		#Added .float to make inputs float type in CUDA
+		h = F.relu(self.fc5(x_in.float()))
 		h = F.relu(self.fc6(h))
 		h = F.relu(self.fc7(h))
 		h = F.relu(self.fc8(h))
@@ -136,6 +138,7 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, x_in, x, return_latent_rec=False):
+		#commented encode pieces for now, will them when z's are added
 		#mu, u, d = self.encode(x)
 		#latent_dist = LowRankMultivariateNormal(mu, u, d)
 		#z = latent_dist.rsample()
@@ -143,7 +146,7 @@ class VAE(nn.Module):
 		#elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.z_dim * \
 		#np.log(2*np.pi)) # B * p(z)
 		loss = -0.5 * (self.model_precision * \
-		torch.sum(torch.pow(x.view(-1,IMG_DIM) - x_rec, 2)) + self.z_dim * \
+		torch.sum(torch.pow(x.float().view(-1,IMG_DIM) - x_rec, 2)) + self.z_dim * \
 		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
 		#elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
 		#if return_latent_rec:
@@ -155,12 +158,11 @@ class VAE(nn.Module):
 		self.train()
 		train_loss = 0.0
 		for batch_idx, sample in enumerate(train_loader):
-			#added line here to change inputs slightly
+			#Inputs now come from dataloader dicts
 			x_in = sample['x_in']
 			x_in = x_in.to(self.device)
 			x = sample['volume']
 			x = x.to(self.device)
-			#data = data.to(self.device)
 			loss = self.forward(x_in, x)
 			train_loss += loss.item()
 			self.optimizer.zero_grad()
@@ -180,7 +182,6 @@ class VAE(nn.Module):
 				x_in = x_in.to(self.device)
 				x = sample['volume']
 				x = x.to(self.device)
-				#data = data.to(self.device)
 				loss = self.forward(x_in, x)
 				test_loss += loss.item()
 		test_loss /= len(test_loader.dataset)
@@ -212,7 +213,7 @@ class VAE(nn.Module):
 		self.loss = checkpoint['loss']
 		self.epoch = checkpoint['epoch']
 
-# Not using/creating latents yet ...
+# Not using latents yet ...
 #	def project_latent(self, loaders_dict, save_dir, title=None, split=2000):
 		# plotting only test since this is unshuffled
 		# Collect latent means.
@@ -247,34 +248,8 @@ class VAE(nn.Module):
 		# uncomment this if we actually wish to get latent and projections
 		#return latent, projection
 
-    # Old version from Rachel.  Both work.
-	#Take it out if not needed
-    #def project_latent(self, loader, filename, title=None):
-        # Collect latent means.
-        #this is version for only 1 img file!!!
-		# Should add version for multiple files if relevant
-    #    latent = np.zeros((len(loader.dataset), self.z_dim))
-    #    with torch.no_grad():
-    #        j = 0
-    #        for i, data in enumerate(loader):
-    #            data = data.to(self.device)
-    #            mu, _, _ = self.encode(data) # unclear if this will work
-    #            latent[j:j+len(mu)] = mu.detach().cpu().numpy()
-    #            j += len(mu)
-        # UMAP them.
-    #    transform = umap.UMAP(n_components=2, n_neighbors=20, min_dist=0.1, \
-    #                          metric='euclidean', random_state=42)
-    #    projection = transform.fit_transform(latent)
-    #    print(projection.shape)
-        # Plot.
-    #    plt.scatter(projection[:,0], projection[:,1], s=1.0, alpha=0.6)
-    #    plt.axis('off')
-    #    if title is not None:
-    #        plt.title(title)
-    #    plt.savefig(filename)
-    #    return latent, projection
-
-    # unsure if we want to recon at this point?
+#Am creating a slightly modified recon method.
+#This is Rachel's old one
 	# could recreate using x_rec
 	#def reconstruct(self, input_volume, ref_nii, save_dir):
 	#	"""Reconstruct the given input volume."""
@@ -310,8 +285,8 @@ class VAE(nn.Module):
 			# Save the model.
 			if (save_freq is not None) and (epoch % save_freq == 0) and (epoch > 0):
 				filename = "checkpoint_"+str(epoch).zfill(3)+'.tar'
-				file_path = os.path.join(save_dir, filename) # added
-				self.save_state(filepath)
+				file_path = os.path.join(save_dir, filename) # this line was added, see if this is source of saving issue
+				self.save_state(file_path)
 
 if __name__ == "__main__":
 	pass
