@@ -27,12 +27,8 @@ class FMRIDataset(Dataset):
         """
         unique_subjs = self.df.subjid.unique().tolist()
         maxsig = 65536 # see if this is still same value?
-        #create ID mat
-        # Each row is  a one-hot for each unique subjid in df
-        id_mat = np.identity(len(unique_subjs))
         subjid = self.df.iloc[idx,1]
-        onehot_idx = unique_subjs.index(subjid)
-        one_hot = id_mat[onehot_idx]
+        idx = unique_subjs.index(subjid)
         age = self.df.iloc[idx,4]
         sex = self.df.iloc[idx,5]
         task = self.df.iloc[idx,6]
@@ -41,7 +37,7 @@ class FMRIDataset(Dataset):
         fmri = np.array(nib.load(nii).dataobj)
         fmri_norm = np.true_divide(fmri, maxsig)
         volume = fmri_norm[:,:,:,vol_num]
-        sample = {'subjid': subjid, 'volume': volume, 'one_hot': one_hot,
+        sample = {'subjid': idx, 'volume': volume,
                       'age': age, 'sex': sex, "task":task}
         if self.transform:
             sample = self.transform(sample)
@@ -52,13 +48,12 @@ class ToTensor(object):
     "Concatenates input array and converts sample arrays to tensors"
 
     def __call__(self, sample):
-        subjid, volume, id_vector, age, sex, task = sample['subjid'], sample['volume'], sample['one_hot'], sample['age'], sample['sex'], sample['task']
-        concat = np.append(id_vector, age)
-        concat = np.append (concat, sex)
+        subjid, volume, age, sex, task = sample['subjid'], sample['volume'], sample['age'], sample['sex'], sample['task']
+        concat = np.append(age, sex)
         concat = np.append (concat, task)
-        return{'x_in':torch.from_numpy(concat),
-                'volume': torch.from_numpy(volume),
-                'subjid': subjid}
+        return{'covariates':torch.from_numpy(concat).float(),
+                'volume': torch.from_numpy(volume).float(),
+                'subjid': torch.tensor(subjid, dtype=torch.int64)} # unsure if this will work 
 
 def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file='/home/dfd4/fmri_vae/resampled/preproc_dset.csv'):
     #Set num workers to zero to avoid runtime error msg.
