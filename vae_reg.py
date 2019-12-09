@@ -139,20 +139,34 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
+		# creating dict to hold base, cons and full reconstruction
+		# num of cons is hard-coded for now. Will mk it flexible if this works...
+		imgs = {'base': {}, 'cons0': {}, 'cons1':{}, 'cons2':{}, 'full_rec': {}}
 		id_oh = torch.nn.functional.one_hot(ids, self.num_subjects)
 		cov_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
 		cov_oh = cov_oh.to(self.device)
 		z = torch.cat([id_oh, cov_oh], 1).float()
 		x_rec = self.decode(z).view(x.shape[0], -1)
+		imgs['base'] = x_rec.detach().cpu().numpy()
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device)
 			z = torch.cat([id_oh, cov_oh], 1).float()
 			diff = self.decode(z).view(x.shape[0], -1)
-			x_rec = x_rec + torch.matmul(covariates[:,i-1], diff)
-		loss = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2))
+			cons = torch.matmul(covariates[:,i-1], diff)
+			#x_rec = x_rec + torch.matmul(covariates[:,i-1], diff)
+			x_rec = x_rec + cons
+			if i==1:
+				imgs['cons0']=cons.detach().cpu().numpy()
+			elif i==2:
+				imgs['cons1']=cons.detach().cpu().numpy()
+			else:
+				imgs['cons2']=cons.detach().cpu().numpy()
+		imgs['full_rec']=x_rec.detach().cpu().numpy()
+		loss = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) #this adds base w/ all cons for loss calculation. Is this what we want?
 		if return_latent_rec:
-			return loss, x_rec
+			#return -loss, x_rec
+			return loss, imgs
 		return loss
 
 	def train_epoch(self, train_loader):
@@ -254,23 +268,27 @@ class VAE(nn.Module):
 		# uncomment this if we actually wish to get latent and projections
 		#return latent, projection
 
-    #needs to reconstruct both sum, base and separate cons for any given volume
-	#inout should be instead a vol #?
-	#def reconstruct(self, input_volume, ref_nii, save_dir):
-	#	"""Reconstruct the given input volume."""
-	#	filename = 'reconstructed_data.nii'
-	#	file_path = os.path.join(save_dir, filename)
-	#	input_volume = torch.tensor(input_volume, dtype=torch.float64).type(torch.FloatTensor)
-	#	input_volume = input_volume.to(self.device)
-	#	with torch.no_grad():
-	#		_, _, reconstructed = self.forward(input_volume, return_latent_rec = True) #mk fwrd return recon
-	#		reconstructed = reconstructed.detach().cpu().numpy()
-	#		recon_array = reconstructed.reshape(41,49,35)
-			#use nibabel to load in header and affine of filename
-			# call that when writing recon_nifti
-	#		input_nifti = nib.load(ref_nii)
-	#		recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
-	#		nib.save(recon_nifti, file_path) #add flexibility here for saving in a specific dir
+    # Needs to reconstruct both sum, base and separate cons for any given volume
+	def reconstruct(self, item, ref_nii, save_dir):
+		"""Reconstruct a volume and its cons given a dset idx."""
+		x = item['volume'].unsqueeze(0)
+		x = x.to(self.device)
+		covariates = item['covariates'].unsqueeze(0)
+		covariates = covariates.to(self.device)
+		ids = item['subjid'].view(1)
+		ids = ids.to(self.device)
+		with torch.no_grad():
+			_, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and cons
+			for key in imgs.keys():
+				filename = 'recon_{}.nii'.format(key)
+				filepath = os.path.join(save_dir, filename)
+				reconstructed = imgs[key]
+				recon_array = reconstructed.reshape(41,49,35)
+				#use nibabel to load in header and affine of filename
+				#call that when writing recon_nifti
+				input_nifti = nib.load(ref_nii)
+				recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
+				nib.save(recon_nifti, filepath)
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
