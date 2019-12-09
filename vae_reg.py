@@ -136,7 +136,8 @@ class VAE(nn.Module):
 		h = F.relu(self.convt2(h))
 		h = F.relu(self.convt3(self.bnt3(h)))
 		h = F.relu(self.convt4(h))
-		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
+		return self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM)
+		#return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
 		# creating dict to hold base, cons and full reconstruction
