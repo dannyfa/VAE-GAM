@@ -152,8 +152,8 @@ class VAE(nn.Module):
 			x_rec = x_rec + torch.matmul(covariates[:,i-1], diff)
 		loss = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2))
 		if return_latent_rec:
-			return -loss, x_rec
-		return -loss
+			return loss, x_rec
+		return loss
 
 	def train_epoch(self, train_loader):
 		self.train()
