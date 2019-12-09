@@ -255,22 +255,22 @@ class VAE(nn.Module):
 		#return latent, projection
 
     #needs to reconstruct both sum, base and separate cons for any given volume
-	#inout should be instead a vol #? 
-	def reconstruct(self, input_volume, ref_nii, save_dir):
-		"""Reconstruct the given input volume."""
-		filename = 'reconstructed_data.nii'
-		file_path = os.path.join(save_dir, filename)
-		input_volume = torch.tensor(input_volume, dtype=torch.float64).type(torch.FloatTensor)
-		input_volume = input_volume.to(self.device)
-		with torch.no_grad():
-			_, _, reconstructed = self.forward(input_volume, return_latent_rec = True) #mk fwrd return recon
-			reconstructed = reconstructed.detach().cpu().numpy()
-			recon_array = reconstructed.reshape(41,49,35)
+	#inout should be instead a vol #?
+	#def reconstruct(self, input_volume, ref_nii, save_dir):
+	#	"""Reconstruct the given input volume."""
+	#	filename = 'reconstructed_data.nii'
+	#	file_path = os.path.join(save_dir, filename)
+	#	input_volume = torch.tensor(input_volume, dtype=torch.float64).type(torch.FloatTensor)
+	#	input_volume = input_volume.to(self.device)
+	#	with torch.no_grad():
+	#		_, _, reconstructed = self.forward(input_volume, return_latent_rec = True) #mk fwrd return recon
+	#		reconstructed = reconstructed.detach().cpu().numpy()
+	#		recon_array = reconstructed.reshape(41,49,35)
 			#use nibabel to load in header and affine of filename
 			# call that when writing recon_nifti
-			input_nifti = nib.load(ref_nii)
-			recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
-			nib.save(recon_nifti, file_path) #add flexibility here for saving in a specific dir
+	#		input_nifti = nib.load(ref_nii)
+	#		recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
+	#		nib.save(recon_nifti, file_path) #add flexibility here for saving in a specific dir
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
