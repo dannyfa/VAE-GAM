@@ -28,7 +28,7 @@ class FMRIDataset(Dataset):
         unique_subjs = self.df.subjid.unique().tolist()
         maxsig = 65536 # see if this is still same value?
         subjid = self.df.iloc[idx,1]
-        idx = unique_subjs.index(subjid)
+        subj_idx = unique_subjs.index(subjid)
         age = self.df.iloc[idx,4]
         sex = self.df.iloc[idx,5]
         task = self.df.iloc[idx,6]
@@ -37,7 +37,7 @@ class FMRIDataset(Dataset):
         fmri = np.array(nib.load(nii).dataobj)
         fmri_norm = np.true_divide(fmri, maxsig)
         volume = fmri_norm[:,:,:,vol_num]
-        sample = {'subjid': idx, 'volume': volume,
+        sample = {'subjid': subj_idx, 'volume': volume,
                       'age': age, 'sex': sex, "task":task}
         if self.transform:
             sample = self.transform(sample)
@@ -53,7 +53,7 @@ class ToTensor(object):
         concat = np.append (concat, task)
         return{'covariates':torch.from_numpy(concat).float(),
                 'volume': torch.from_numpy(volume).float(),
-                'subjid': torch.tensor(subjid, dtype=torch.int64)} # unsure if this will work 
+                'subjid': torch.tensor(subjid, dtype=torch.int64)} # unsure if this will work
 
 def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file='/home/dfd4/fmri_vae/resampled/preproc_dset.csv'):
     #Set num workers to zero to avoid runtime error msg.
