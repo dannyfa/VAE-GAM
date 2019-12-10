@@ -1,8 +1,7 @@
 """
-Z-less fMRIVAE model incorporating covariates sex, age and task type
-Should at some point merge w/ Z's from original fMRI_VAE model
+Z-based fMRIVAE regression model w/ covariates sex, age and task type (checker in this case)
 
-November 2019
+December 2019
 """
 #uncomment if using matplotlib 3.0 & python3.5 versions
 #import matplotlib
@@ -28,14 +27,16 @@ IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_subjects=3, num_covariates=3, model_precision=10.0, device_name="auto"):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_subjects=3, num_covariates=3, num_latents=32, model_precision=10.0, device_name="auto"):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
 		self.lr = lr
 		self.num_subjects = num_subjects
 		self.num_covariates = num_covariates
-		self.z_dim = num_subjects + num_covariates + 1 # add one extra dim for base map
+		self.num_latents = num_latents
+		#self.z_dim = num_subjects + num_covariates + 1 # add one extra dim for base map
+		self.z_dim = self.num_latents + self.num_covariates + 1
 		self.model_precision = model_precision
 		assert device_name != "cuda" or torch.cuda.is_available()
 		if device_name == "auto":
@@ -50,28 +51,27 @@ class VAE(nn.Module):
 		self.to(self.device)
 
 	def _build_network(self):
-		#Commented encoder piece for now. Will need it once we incorporate Z's into model
 		# Encoder
-		#self.conv1 = nn.Conv3d(1,self.nf,3,1)
-		#self.conv2 = nn.Conv3d(self.nf,self.nf,3,2)
-		#self.conv3 = nn.Conv3d(self.nf,2*self.nf,3,1)
-		#self.conv4 = nn.Conv3d(2*self.nf,2*self.nf,3,2)
-		#self.conv5 = nn.Conv3d(2*self.nf,2*self.nf,3,1)
-		#self.bn1 = nn.BatchNorm3d(1)
-		#self.bn3 = nn.BatchNorm3d(self.nf)
-		#self.bn5 = nn.BatchNorm3d(2*self.nf)
-		#self.fc1 = nn.Linear(2*self.nf*6*8*4, 200)
-		#self.fc2 = nn.Linear(200, 100)
-		#self.fc31 = nn.Linear(100, 50)
-		#self.fc32 = nn.Linear(100, 50)
-		#self.fc33 = nn.Linear(100, 50)
-		#self.fc41 = nn.Linear(50, self.z_dim)
-		#self.fc42 = nn.Linear(50, self.z_dim)
-		#self.fc43 = nn.Linear(50, self.z_dim)
+		self.conv1 = nn.Conv3d(1,self.nf,3,1)
+		self.conv2 = nn.Conv3d(self.nf,self.nf,3,2)
+		self.conv3 = nn.Conv3d(self.nf,2*self.nf,3,1)
+		self.conv4 = nn.Conv3d(2*self.nf,2*self.nf,3,2)
+		self.conv5 = nn.Conv3d(2*self.nf,2*self.nf,3,1)
+		self.bn1 = nn.BatchNorm3d(1)
+		self.bn3 = nn.BatchNorm3d(self.nf)
+		self.bn5 = nn.BatchNorm3d(2*self.nf)
+		self.fc1 = nn.Linear(2*self.nf*6*8*4, 200)
+		self.fc2 = nn.Linear(200, 100)
+		self.fc31 = nn.Linear(100, 50)
+		self.fc32 = nn.Linear(100, 50)
+		self.fc33 = nn.Linear(100, 50)
+		self.fc41 = nn.Linear(50, self.num_latents)
+		self.fc42 = nn.Linear(50, self.num_latents)
+		self.fc43 = nn.Linear(50, self.num_latents)
 
 		#Decoder
 		# In future, implement more flexibility when choosing nn params
-		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be n+k+1. Here should be 7 - 3 subjs + 3 covariates + base.
+		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be z+k+1. Here should be 36 - 32 z's + 3 covariates + base.
 		self.fc6 = nn.Linear(50, 100)
 		self.fc7 = nn.Linear(100, 200)
 		self.fc8 = nn.Linear(200, 2*self.nf*6*8*5)
@@ -89,42 +89,42 @@ class VAE(nn.Module):
 		Again, adaptions here were minimal -- enough to match layers defined
 		in __build_network.
 		"""
-		#return {'fc1':self.fc1, 'fc2':self.fc2, 'fc31':self.fc31,
-        #        'fc32':self.fc32, 'fc33':self.fc33, 'fc41':self.fc41,
-        #        'fc42':self.fc42, 'fc43':self.fc43, 'fc5':self.fc5,
-        #        'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8, 'bn1':self.bn1,
-        #        'bn3':self.bn3, 'bn5':self.bn5,'bnt1':self.bnt1, 'bnt3':self.bnt3,
-        #        'bnt5':self.bnt5, 'conv1':self.conv1,'conv2':self.conv2,
-        #        'conv3':self.conv3, 'conv4':self.conv4,
-        #        'conv5':self.conv5,'convt1':self.convt1, 'convt2':self.convt2,
-        #        'convt3':self.convt3, 'convt4':self.convt4,
-        #        'convt5':self.convt5}
-
-		return {'fc5':self.fc5,'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8,
-		        'bnt1':self.bnt1,'bnt3':self.bnt3,'bnt5':self.bnt5, 'convt1':self.convt1,
-				'convt2':self.convt2,'convt3':self.convt3, 'convt4':self.convt4,
+		return {'fc1':self.fc1, 'fc2':self.fc2, 'fc31':self.fc31,
+                'fc32':self.fc32, 'fc33':self.fc33, 'fc41':self.fc41,
+                'fc42':self.fc42, 'fc43':self.fc43, 'fc5':self.fc5,
+                'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8, 'bn1':self.bn1,
+                'bn3':self.bn3, 'bn5':self.bn5,'bnt1':self.bnt1, 'bnt3':self.bnt3,
+                'bnt5':self.bnt5, 'conv1':self.conv1,'conv2':self.conv2,
+                'conv3':self.conv3, 'conv4':self.conv4,
+                'conv5':self.conv5,'convt1':self.convt1, 'convt2':self.convt2,
+                'convt3':self.convt3, 'convt4':self.convt4,
                 'convt5':self.convt5}
 
-    #Commenting encode method for now
-	#def encode(self, x):
+		#return {'fc5':self.fc5,'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8,
+		 #       'bnt1':self.bnt1,'bnt3':self.bnt3,'bnt5':self.bnt5, 'convt1':self.convt1,
+		#		'convt2':self.convt2,'convt3':self.convt3, 'convt4':self.convt4,
+        #        'convt5':self.convt5}
+
+
+	def encode(self, x):
 		#modf so that outpout is in form mu, u, d
 		#will try subst. view for squeeze in some pieces here
-		#x = x.view(-1,1,IMG_SHAPE[0],IMG_SHAPE[1],IMG_SHAPE[2]) # better to use unsqueeze?
-		#h = F.relu(self.conv1(self.bn1(x)))
-		#h = F.relu(self.conv2(h))
-		#h = F.relu(self.conv3(self.bn3(h)))
-		#h = F.relu(self.conv4(h))
-		#h = F.relu(self.conv5(self.bn5(h)))
-		#h = h.view(-1,2*self.nf*6*8*4)
-		#h = F.relu(self.fc1(h))
-		#h = F.relu(self.fc2(h))
-		#mu = F.relu(self.fc31(h))
-		#mu = self.fc41(mu)
-		#u = F.relu(self.fc32(h))
-		#u = self.fc42(u).unsqueeze(-1) # Last dimension is rank of \Sigma = 1.
-		#d = F.relu(self.fc33(h))
-		#d = torch.exp(self.fc43(d)) # d must be positive.
-		#return mu, u, d
+		x = x.view(-1,1,IMG_SHAPE[0],IMG_SHAPE[1],IMG_SHAPE[2]) # better to use unsqueeze?
+		h = F.relu(self.conv1(self.bn1(x)))
+		h = F.relu(self.conv2(h))
+		h = F.relu(self.conv3(self.bn3(h)))
+		h = F.relu(self.conv4(h))
+		h = F.relu(self.conv5(self.bn5(h)))
+		h = h.view(-1,2*self.nf*6*8*4)
+		h = F.relu(self.fc1(h))
+		h = F.relu(self.fc2(h))
+		mu = F.relu(self.fc31(h))
+		mu = self.fc41(mu)
+		u = F.relu(self.fc32(h))
+		u = self.fc42(u).unsqueeze(-1) # Last dimension is rank of \Sigma = 1.
+		d = F.relu(self.fc33(h))
+		d = torch.exp(self.fc43(d)) # d must be positive.
+		return mu, u, d
 
 	def decode(self, z):
 		h = F.relu(self.fc5(z))
@@ -137,25 +137,31 @@ class VAE(nn.Module):
 		h = F.relu(self.convt3(self.bnt3(h)))
 		h = F.relu(self.convt4(h))
 		return self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM)
+		#took out sigmoid constraint on last layer
 		#return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
 		# creating dict to hold base, cons and full reconstruction
 		# num of cons is hard-coded for now. Will mk it flexible if this works...
 		imgs = {'base': {}, 'cons0': {}, 'cons1':{}, 'cons2':{}, 'full_rec': {}}
-		id_oh = torch.nn.functional.one_hot(ids, self.num_subjects)
+		#getting z's using encoder
+		mu, u, d = self.encode(x)
+		latent_dist = LowRankMultivariateNormal(mu, u, d)
+		z = latent_dist.rsample()
+		#commenting subjID one-hot
+		#id_oh = torch.nn.functional.one_hot(ids, self.num_subjects)
 		cov_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
-		cov_oh = cov_oh.to(self.device)
-		z = torch.cat([id_oh, cov_oh], 1).float()
-		x_rec = self.decode(z).view(x.shape[0], -1)
+		cov_oh = cov_oh.to(self.device).float()
+		zcat = torch.cat([z, cov_oh], 1).float()
+		x_rec = self.decode(zcat).view(x.shape[0], -1)
 		imgs['base'] = x_rec.detach().cpu().numpy()
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
-			cov_oh = cov_oh.to(self.device)
-			z = torch.cat([id_oh, cov_oh], 1).float()
-			diff = self.decode(z).view(x.shape[0], -1)
+			cov_oh = cov_oh.to(self.device).float()
+			#z = torch.cat([id_oh, cov_oh], 1).float()
+			zcat = torch.cat([z, cov_oh], 1).float()
+			diff = self.decode(zcat).view(x.shape[0], -1)
 			cons = torch.matmul(covariates[:,i-1], diff)
-			#x_rec = x_rec + torch.matmul(covariates[:,i-1], diff)
 			x_rec = x_rec + cons
 			if i==1:
 				imgs['cons0']=cons.detach().cpu().numpy()
@@ -164,11 +170,17 @@ class VAE(nn.Module):
 			else:
 				imgs['cons2']=cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
-		loss = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) #this adds base w/ all cons for loss calculation. Is this what we want?
+		#calculating loss
+		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.z_dim * \
+		np.log(2*np.pi)) # B * p(z)
+		elbo = elbo + -0.5 * (self.model_precision * \
+		torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) + self.z_dim * \
+		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
+		elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
+		#loss = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2))
 		if return_latent_rec:
-			#return -loss, x_rec
-			return loss, imgs
-		return loss
+			return -elbo, z.detach().cpu().numpy(), imgs
+		return -elbo
 
 	def train_epoch(self, train_loader):
 		self.train()
@@ -234,39 +246,41 @@ class VAE(nn.Module):
 		self.loss = checkpoint['loss']
 		self.epoch = checkpoint['epoch']
 
-# Not using latents yet ...
-#	def project_latent(self, loaders_dict, save_dir, title=None, split=2000):
-		# plotting only test since this is unshuffled
-		# Collect latent means.
-		#filename = 'temp.pdf'
-		#file_path = os.path.join(save_dir, filename)
-		#latent = np.zeros((len(loaders_dict['test'].dataset), self.z_dim))
-		#with torch.no_grad():
-		#	j = 0
-		#	for i, data in enumerate(loaders_dict['test']):
-		#		data = data.to(self.device)
-		#		mu, _, _ = self.encode(data)
-		#		latent[j:j+len(mu)] = mu.detach().cpu().numpy()
-		#		j += len(mu)
+
+	def project_latent(self, loaders_dict, save_dir, title=None, split=98):
+		# plotting only test set since this is un-shuffled. Will plot by subjid in future to overcome this limitation
+		#Collect latent means.
+		filename = 'temp.pdf'
+		file_path = os.path.join(save_dir, filename)
+		latent = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
+		with torch.no_grad():
+			j = 0
+			for i, sample in enumerate(loaders_dict['test']):
+				x = sample['volume']
+				x = x.to(self.device)
+				mu, _, _ = self.encode(x)
+				latent[j:j+len(mu)] = mu.detach().cpu().numpy()
+				j += len(mu)
 		# UMAP them.
-		#transform = umap.UMAP(n_components=2, n_neighbors=20, min_dist=0.1, \
-		#metric='euclidean', random_state=42)
-		#projection = transform.fit_transform(latent)
+		transform = umap.UMAP(n_components=2, n_neighbors=20, min_dist=0.1, \
+		metric='euclidean', random_state=42)
+		projection = transform.fit_transform(latent)
 		#print(projection.shape)
 		# Plot.
-		#c_list = ['b','g','r','c','m','y','k','orange','blueviolet','hotpink','lime','skyblue','teal','sienna']
-		#colors = itertools.cycle(c_list)
-		#data_chunks = range(0,len(loaders_dict['test'].dataset),split)
+		c_list = ['b','g','r','c','m','y','k','orange','blueviolet','hotpink','lime','skyblue','teal','sienna']
+		colors = itertools.cycle(c_list)
+		data_chunks = range(0,len(loaders_dict['test'].dataset),split)  #check value of split here
 		#print(data_chunks)
-		#for i in data_chunks:
-		#	t = np.arange(split)
-			# plt.scatter(projection[i:i+2000,0], projection[i:i+2000,1], color=next(colors), s=1.0, alpha=0.6)
-		#	plt.scatter(projection[i:i+split,0], projection[i:i+split,1], c=t, s=1.0, alpha=0.6)
-		#	plt.axis('off')
-		#if title is not None:
-		#	plt.title(title)
-		#plt.savefig(file_path)
-		# uncomment this if we actually wish to get latent and projections
+		for i in data_chunks:
+			t = np.arange(split)
+			plt.scatter(projection[i:i+split,0], projection[i:i+split,1], color=next(colors), s=1.0, alpha=0.6)
+			#commenting plot by time
+			#plt.scatter(projection[i:i+split,0], projection[i:i+split,1], c=t, s=1.0, alpha=0.6)
+			plt.axis('off')
+		if title is not None:
+			plt.title(title)
+		plt.savefig(file_path)
+		#Uncomment this if we actually wish to get latent and projections
 		#return latent, projection
 
     # Needs to reconstruct both sum, base and separate cons for any given volume
@@ -279,7 +293,7 @@ class VAE(nn.Module):
 		ids = item['subjid'].view(1)
 		ids = ids.to(self.device)
 		with torch.no_grad():
-			_, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and cons
+			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and cons
 			for key in imgs.keys():
 				filename = 'recon_{}.nii'.format(key)
 				filepath = os.path.join(save_dir, filename)
