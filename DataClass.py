@@ -35,7 +35,7 @@ class FMRIDataset(Dataset):
         nii = self.df.iloc[idx,3]
         vol_num = self.df.iloc[idx,2]
         fmri = np.array(nib.load(nii).dataobj)
-        fmri_norm = np.true_divide(fmri, maxsig)
+        fmri_norm = np.true_divide(fmri, maxsig) # check on this as well 
         volume = fmri_norm[:,:,:,vol_num]
         sample = {'subjid': subj_idx, 'volume': volume,
                       'age': age, 'sex': sex, "task":task}
