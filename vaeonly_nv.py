@@ -24,6 +24,7 @@ import os
 import itertools
 from sklearn.decomposition import PCA # for new PCA method
 import pandas as pd # to save PCA results
+from scipy.stats import shapiro # for Gaussian dist testing on PCs
 
 IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
@@ -252,18 +253,32 @@ class VAE(nn.Module):
 				mu, _, _ = self.encode(x)
 				latents[j:j+len(mu)] = mu.detach().cpu().numpy()
 				j += len(mu)
-		print("Shape of latent means input: {}".format(latents.shape))
+		print("="*40)
+		print('Computing latent means PCA with 2 PCs')
+		#print("Shape of latent means input: {}".format(latents.shape))
 		pca = PCA(n_components=2)
 		components = pca.fit_transform(latents)
-		print("Shape of PCA components: {}".format(components.shape))
-		print("Explained variance ratio {}".format(pca.explained_variance_ratio_))
-		print("Singular values {}".format(pca.singular_values_))
+		#print("Shape of PCA components: {}".format(components.shape))
+		print("Explained variance ratio for PCs 1 & 2: {}".format(pca.explained_variance_ratio_))
+		print("Singular values for PCs 1 & 2: {}".format(pca.singular_values_))
 		principalDf = pd.DataFrame(data = components, columns = ['PC 1', 'PC 2'])
-		print("Component 1 mean: {}".format(principalDf['PC 1'].mean()))
-		print("Component 1 std: {}".format(principalDf['PC 1'].std()))
-		print("Component 2 mean: {}".format(principalDf['PC 2'].mean()))
-		print("Component 2 std: {}".format(principalDf['PC 2'].std()))
-		#save latent means to csv file that can be re-used if needed
+		cols = principalDf.columns
+		for i in range(len(cols)):
+			print("Component {} mean: {}".format(i+1, principalDf[cols[i]].mean()))
+			print("Component {} std: {}".format(i+1, principalDf[cols[i]].std()))
+		print ("="*40)
+		#Test for Gaussianity using Shapiro-Wilkin test
+		print("Using Shapiro-Wilk's method to test for normality of calculated PCs")
+		for i in range(len(cols)):
+			print(cols[i])
+			stat, p = shapiro(principalDf[cols[i]])
+			print('Statistics=%.3f, p=%.3f' % (stat, p))
+			alpha = 0.05
+			if p > alpha:
+				print('Sample looks Gaussian (fail to reject H0)')
+			else:
+				print('Sample does not look Gaussian (reject H0)')
+		#save latent means PCs to csv file
 		principalDf.to_csv(csv_path)
 
 	def reconstruct(self, item, ref_nii, save_dir):
