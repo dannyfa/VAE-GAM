@@ -268,7 +268,7 @@ class VAE(nn.Module):
 			print("Component {} std: {}".format(i+1, principalDf[cols[i]].std()))
 		print ("="*40)
 		#Test for Gaussianity using Shapiro-Wilkin test
-		print("Using Shapiro-Wilk's method to test for normality of calculated PCs")
+		print("Using Shapiro-Wilkin’s method to test if PCs are normally distributed")
 		for i in range(len(cols)):
 			print(cols[i])
 			stat, p = shapiro(principalDf[cols[i]])

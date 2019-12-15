@@ -26,7 +26,6 @@ class FMRIDataset(Dataset):
            one_not: a one_hot vector identifying each subj
         """
         unique_subjs = self.df.subjid.unique().tolist()
-        maxsig = 65536 # see if this is still same value?
         subjid = self.df.iloc[idx,1]
         subj_idx = unique_subjs.index(subjid)
         age = self.df.iloc[idx,4]
@@ -35,9 +34,12 @@ class FMRIDataset(Dataset):
         nii = self.df.iloc[idx,3]
         vol_num = self.df.iloc[idx,2]
         fmri = np.array(nib.load(nii).dataobj)
-        fmri_norm = np.true_divide(fmri, maxsig) # check on this as well 
-        volume = fmri_norm[:,:,:,vol_num]
-        sample = {'subjid': subj_idx, 'volume': volume,
+        max = 3284.5 # min is zero! This simplifies norm calc -- becomes x/xmax
+        #max = 65536 # used on old dset...
+        volume = fmri[:,:,:,vol_num]
+        flat_vol = volume.flatten()
+        norm_vol = np.true_divide(flat_vol, max).reshape(41,49,35)
+        sample = {'subjid': subj_idx, 'volume': norm_vol,
                       'age': age, 'sex': sex, "task":task}
         if self.transform:
             sample = self.transform(sample)
