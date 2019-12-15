@@ -1,6 +1,6 @@
 """
 Wrapper to call in data class, loaders and VAEfMRI model.
-New version indeded for checker data 
+New version indeded for checker data
 December 2019
 """
 import os, sys
@@ -50,6 +50,7 @@ if __name__ == "__main__":
 	model = vae_reg.VAE()
 	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
 	model.project_latent(loaders_dict, title = "Nv VAE only test", split=args.split, save_dir=args.save_dir)
+	model.compute_PCA(loaders_dict, save_dir=args.save_dir)
 	#use if wanting to recreate cons and etc
 	data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	idx= 18 # making this 18th item in dset for now. Will be user input later
