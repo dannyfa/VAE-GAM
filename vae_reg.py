@@ -22,6 +22,9 @@ from torch.distributions import LowRankMultivariateNormal # needed for Jack's v
 import umap
 import os
 import itertools
+from sklearn.decomposition import PCA # for new PCA method
+import pandas as pd # to save PCA results
+from scipy.stats import shapiro # for Gaussian dist testing on PCs
 
 IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
@@ -100,12 +103,6 @@ class VAE(nn.Module):
                 'convt3':self.convt3, 'convt4':self.convt4,
                 'convt5':self.convt5}
 
-		#return {'fc5':self.fc5,'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8,
-		 #       'bnt1':self.bnt1,'bnt3':self.bnt3,'bnt5':self.bnt5, 'convt1':self.convt1,
-		#		'convt2':self.convt2,'convt3':self.convt3, 'convt4':self.convt4,
-        #        'convt5':self.convt5}
-
-
 	def encode(self, x):
 		#modf so that outpout is in form mu, u, d
 		#will try subst. view for squeeze in some pieces here
@@ -136,9 +133,9 @@ class VAE(nn.Module):
 		h = F.relu(self.convt2(h))
 		h = F.relu(self.convt3(self.bnt3(h)))
 		h = F.relu(self.convt4(h))
-		return self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM)
-		#took out sigmoid constraint on last layer
-		#return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
+		#Umcomment if wanting to take out sigmoid constraint from last layer
+		#return self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM)
+		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
 		# creating dict to hold base, cons and full reconstruction
@@ -282,6 +279,48 @@ class VAE(nn.Module):
 		plt.savefig(file_path)
 		#Uncomment this if we actually wish to get latent and projections
 		#return latent, projection
+
+    # Adding new method to compute 2components PCA for entire latent mean set
+	# Will use it to test collapse mode
+	def compute_PCA(self, loaders_dict, save_dir):
+		csv_file = 'PCA_2n.csv'
+		csv_path = os.path.join(save_dir, csv_file)
+		latents = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
+		with torch.no_grad():
+			j = 0
+			for i, sample in enumerate(loaders_dict['test']):
+				x = sample['volume']
+				x = x.to(self.device)
+				mu, _, _ = self.encode(x)
+				latents[j:j+len(mu)] = mu.detach().cpu().numpy()
+				j += len(mu)
+		print("="*40)
+		print('Computing latent means PCA with 2 PCs')
+		#print("Shape of latent means input: {}".format(latents.shape))
+		pca = PCA(n_components=2)
+		components = pca.fit_transform(latents)
+		#print("Shape of PCA components: {}".format(components.shape))
+		print("Explained variance ratio for PCs 1 & 2: {}".format(pca.explained_variance_ratio_))
+		print("Singular values for PCs 1 & 2: {}".format(pca.singular_values_))
+		principalDf = pd.DataFrame(data = components, columns = ['PC 1', 'PC 2'])
+		cols = principalDf.columns
+		for i in range(len(cols)):
+			print("Component {} mean: {}".format(i+1, principalDf[cols[i]].mean()))
+			print("Component {} std: {}".format(i+1, principalDf[cols[i]].std()))
+		print ("="*40)
+		#Test for Gaussianity using Shapiro-Wilkin test
+		print("Using Shapiro-Wilkin’s method to test if PCs are normally distributed")
+		for i in range(len(cols)):
+			print(cols[i])
+			stat, p = shapiro(principalDf[cols[i]])
+			print('Statistics=%.3f, p=%.3f' % (stat, p))
+			alpha = 0.05
+			if p > alpha:
+				print('Sample looks Gaussian (fail to reject H0)')
+			else:
+				print('Sample does not look Gaussian (reject H0)')
+		#save latent means PCs to csv file
+		principalDf.to_csv(csv_path)
 
     # Needs to reconstruct both sum, base and separate cons for any given volume
 	def reconstruct(self, item, ref_nii, save_dir):
