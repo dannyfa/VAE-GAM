@@ -28,9 +28,11 @@ class FMRIDataset(Dataset):
         unique_subjs = self.df.subjid.unique().tolist()
         subjid = self.df.iloc[idx,1]
         subj_idx = unique_subjs.index(subjid)
+        fix_id = 0 # fixed id w/ task ==0
         age = self.df.iloc[idx,4]
         sex = self.df.iloc[idx,5]
-        task = self.df.iloc[idx,6]
+        #task = self.df.iloc[idx,6]
+        task = self.df.iloc[fix_id,6]
         nii = self.df.iloc[idx,3]
         vol_num = self.df.iloc[idx,2]
         fmri = np.array(nib.load(nii).dataobj)
@@ -50,12 +52,13 @@ class ToTensor(object):
     "Concatenates input array and converts sample arrays to tensors"
 
     def __call__(self, sample):
-        subjid, volume, age, sex, task = sample['subjid'], sample['volume'], sample['age'], sample['sex'], sample['task']
-        concat = np.append(age, sex)
-        concat = np.append (concat, task)
-        return{'covariates':torch.from_numpy(concat).float(),
+        subjid, volume, task = sample['subjid'], sample['volume'], sample['task']
+        #Took age & sex covars out
+        #concat = np.append(age, sex)
+        #concat = np.append (concat, task)
+        return{'covariates':torch.tensor(task, dtype=torch.float),
                 'volume': torch.from_numpy(volume).float(),
-                'subjid': torch.tensor(subjid, dtype=torch.int64)} # unsure if this will work
+                'subjid': torch.tensor(subjid, dtype=torch.int64)}
 
 def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file='/home/dfd4/fmri_vae/resampled/preproc_dset.csv'):
     #Set num workers to zero to avoid runtime error msg.

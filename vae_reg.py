@@ -30,12 +30,12 @@ IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_subjects=3, num_covariates=3, num_latents=32, model_precision=10.0, device_name="auto"):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_subjects=6, num_covariates=1, num_latents=32, model_precision=10.0, device_name="auto"):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
 		self.lr = lr
-		self.num_subjects = num_subjects
+		#self.num_subjects = num_subjects
 		self.num_covariates = num_covariates
 		self.num_latents = num_latents
 		#self.z_dim = num_subjects + num_covariates + 1 # add one extra dim for base map
@@ -138,40 +138,39 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
-		# creating dict to hold base, cons and full reconstruction
-		# num of cons is hard-coded for now. Will mk it flexible if this works...
-		imgs = {'base': {}, 'cons0': {}, 'cons1':{}, 'cons2':{}, 'full_rec': {}}
+		# creating dict to hold base, task cons and full reconstruction
+		imgs = {'base': {}, 'task': {}, 'full_rec': {}}
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
 		latent_dist = LowRankMultivariateNormal(mu, u, d)
 		z = latent_dist.rsample()
 		#commenting subjID one-hot
 		#id_oh = torch.nn.functional.one_hot(ids, self.num_subjects)
-		cov_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
-		cov_oh = cov_oh.to(self.device).float()
-		zcat = torch.cat([z, cov_oh], 1).float()
+		base_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
+		base_oh = base_oh.to(self.device).float()
+		zcat = torch.cat([z, base_oh], 1).float()
 		x_rec = self.decode(zcat).view(x.shape[0], -1)
 		imgs['base'] = x_rec.detach().cpu().numpy()
+		print(covariates.shape)
+		new_cov = covariates.unsqueeze(-1)
+		print(new_cov.shape)
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
 			#z = torch.cat([id_oh, cov_oh], 1).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
 			diff = self.decode(zcat).view(x.shape[0], -1)
-			cons = torch.matmul(covariates[:,i-1], diff)
+			cons = torch.matmul(new_cov[:, i-1], diff)
+			#cons = torch.matmul(covariates[:,i-1], diff)
 			x_rec = x_rec + cons
 			if i==1:
-				imgs['cons0']=cons.detach().cpu().numpy()
-			elif i==2:
-				imgs['cons1']=cons.detach().cpu().numpy()
-			else:
-				imgs['cons2']=cons.detach().cpu().numpy()
+				imgs['task']=cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
 		#calculating loss
-		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.z_dim * \
+		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
 		np.log(2*np.pi)) # B * p(z)
 		elbo = elbo + -0.5 * (self.model_precision * \
-		torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) + self.z_dim * \
+		torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) + IMG_DIM * \
 		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
 		elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
 		#loss = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2))
