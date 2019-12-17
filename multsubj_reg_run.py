@@ -10,7 +10,7 @@ import torch
 #from torch.utils.data import Dataset, DataLoader
 import time
 import DataClass as data #w/ FMRIDataClass, trsfm and loaders
-import vae_reg # new z-less model
+import vae_reg
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')
 
@@ -48,14 +48,15 @@ if __name__ == "__main__":
 	main_start = time.time()
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
 	model = vae_reg.VAE()
+	#uncomment if starting from pre-trained model state
+	#model.load_state(filename ='/home/dfd4/fmri_vae/resampled/vaereg_NormRegNoPCA/checkpoint_012.tar')
 	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
 	model.project_latent(loaders_dict, title = "New version test", split=args.split, save_dir=args.save_dir)
+	#Uncomment if wanting to do PCA computation after training only (vs. per epoch)
 	#model.compute_PCA(loaders_dict, save_dir=args.save_dir)
-	#use if wanting to recreate cons and etc
 	data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
-	idx= 18 # making this 18th item in dset for now. Will be user input later
+	idx= 18 # making this 18th item in dset for now. Will be user input later. This is a vol with task == 1
 	item = data.__getitem__(idx)
-	#added line here to call recon method
 	model.reconstruct(item, ref_nii=args.ref_nii, save_dir=args.save_dir)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))

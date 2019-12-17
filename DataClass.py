@@ -31,8 +31,9 @@ class FMRIDataset(Dataset):
         fix_id = 0 # fixed id w/ task ==0
         age = self.df.iloc[idx,4]
         sex = self.df.iloc[idx,5]
-        #task = self.df.iloc[idx,6]
-        task = self.df.iloc[fix_id,6]
+        task = self.df.iloc[idx,6]
+        #uncomment only if wishing to make task var zero for all entries 
+        #task = self.df.iloc[fix_id,6]
         nii = self.df.iloc[idx,3]
         vol_num = self.df.iloc[idx,2]
         fmri = np.array(nib.load(nii).dataobj)

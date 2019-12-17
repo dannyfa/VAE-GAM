@@ -1,5 +1,5 @@
 """
-Z-based fMRIVAE regression model w/ covariates sex, age and task type (checker in this case)
+Z-based fMRIVAE regression model w/ covariate task (checkerboard ==1  vs. fixation ==0 in this case)
 
 December 2019
 """
@@ -18,13 +18,13 @@ from torch.optim import Adam
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
-from torch.distributions import LowRankMultivariateNormal # needed for Jack's v
+from torch.distributions import LowRankMultivariateNormal
 import umap
 import os
 import itertools
-from sklearn.decomposition import PCA # for new PCA method
-import pandas as pd # to save PCA results
-from scipy.stats import shapiro # for Gaussian dist testing on PCs
+from sklearn.decomposition import PCA # for PCA method
+#import pandas as pd
+#from scipy.stats import shapiro
 
 IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
@@ -151,9 +151,7 @@ class VAE(nn.Module):
 		zcat = torch.cat([z, base_oh], 1).float()
 		x_rec = self.decode(zcat).view(x.shape[0], -1)
 		imgs['base'] = x_rec.detach().cpu().numpy()
-		print(covariates.shape)
-		new_cov = covariates.unsqueeze(-1)
-		print(new_cov.shape)
+		new_cov = covariates.unsqueeze(-1) # to get (batch_size, 1) tensor shape.
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
@@ -167,6 +165,8 @@ class VAE(nn.Module):
 				imgs['task']=cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
 		#calculating loss
+		# swapped self.z_dim for self.num_latents on 1st term (makes more sense here)
+		# swapped self.z_dim for IMG_DIM on 2nd term since prob is over x
 		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
 		np.log(2*np.pi)) # B * p(z)
 		elbo = elbo + -0.5 * (self.model_precision * \
@@ -183,7 +183,6 @@ class VAE(nn.Module):
 		train_loss = 0.0
 		for batch_idx, sample in enumerate(train_loader):
 			#Inputs now come from dataloader dicts
-			#chnage here to have covariates and ids fed separately?
 			x = sample['volume']
 			x = x.to(self.device)
 			covariates = sample['covariates']
@@ -279,8 +278,8 @@ class VAE(nn.Module):
 		#Uncomment this if we actually wish to get latent and projections
 		#return latent, projection
 
-    # Adding new method to compute 2components PCA for entire latent mean set
-	# Will use it to test collapse mode
+    # Adding new method to compute PCA for latent means.
+	# This can be done per epoch or after some training
 	def compute_PCA(self, loaders_dict, save_dir):
 		csv_file = 'PCA_2n.csv'
 		csv_path = os.path.join(save_dir, csv_file)
@@ -294,34 +293,35 @@ class VAE(nn.Module):
 				latents[j:j+len(mu)] = mu.detach().cpu().numpy()
 				j += len(mu)
 		print("="*40)
-		print('Computing latent means PCA with 2 PCs')
-		#print("Shape of latent means input: {}".format(latents.shape))
-		pca = PCA(n_components=2)
+		print('Computing latent means PCA')
+		# not setting number of components... This should keep all PCs. Max is 32 here
+		pca = PCA()
 		components = pca.fit_transform(latents)
-		#print("Shape of PCA components: {}".format(components.shape))
-		print("Explained variance ratio for PCs 1 & 2: {}".format(pca.explained_variance_ratio_))
-		print("Singular values for PCs 1 & 2: {}".format(pca.singular_values_))
-		principalDf = pd.DataFrame(data = components, columns = ['PC 1', 'PC 2'])
-		cols = principalDf.columns
-		for i in range(len(cols)):
-			print("Component {} mean: {}".format(i+1, principalDf[cols[i]].mean()))
-			print("Component {} std: {}".format(i+1, principalDf[cols[i]].std()))
-		print ("="*40)
-		#Test for Gaussianity using Shapiro-Wilkin test
-		print("Using Shapiro-Wilkin’s method to test if PCs are normally distributed")
-		for i in range(len(cols)):
-			print(cols[i])
-			stat, p = shapiro(principalDf[cols[i]])
-			print('Statistics=%.3f, p=%.3f' % (stat, p))
-			alpha = 0.05
-			if p > alpha:
-				print('Sample looks Gaussian (fail to reject H0)')
-			else:
-				print('Sample does not look Gaussian (reject H0)')
+		print("Number of components: {}".format(pca.n_components_))
+		print("Explained variance: {}".format(pca.explained_variance_))
+		# Commented old pieces -- unnecessary at this point
+		#components = pca.components_
+		#cols = ['PC{}'.format(i) for i in range(0, pca.n_components_)]
+		#principalDf = pd.DataFrame(data = components, columns = cols)
+		#col_names = principalDf.columns
+		#for i in range(len(cols)):
+		#	print("Component {} mean: {}".format(i, principalDf[cols[i]].mean()))
+		#print ("="*40)
 		#save latent means PCs to csv file
-		principalDf.to_csv(csv_path)
+		#principalDf.to_csv(csv_path)
+		#Test for Gaussianity using Shapiro-Wilkin's test
+		#In theory, PC themselves can be non-gaussian (so this step is not needed lol)
+		#print("Using Shapiro-Wilkin’s method to test if PCs are normally distributed")
+		#for i in range(len(cols)):
+		#	print(cols[i])
+		#	stat, p = shapiro(principalDf[cols[i]])
+		#	print('Statistics=%.3f, p=%.3f' % (stat, p))
+		#	alpha = 0.05
+		#	if p > alpha:
+		#		print('Sample looks Gaussian (fail to reject H0)')
+		#	else:
+		#		print('Sample does not look Gaussian (reject H0)')
 
-    # Needs to reconstruct both sum, base and separate cons for any given volume
 	def reconstruct(self, item, ref_nii, save_dir):
 		"""Reconstruct a volume and its cons given a dset idx."""
 		x = item['volume'].unsqueeze(0)
@@ -354,6 +354,8 @@ class VAE(nn.Module):
 			#Run through the training data and record a loss.
 			loss = self.train_epoch(loaders['train'])
 			self.loss['train'][epoch] = loss
+			#adding  PCA calc for each training epoch.
+			self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
 			# Run through the test data and record a loss.
 			if (test_freq is not None) and (epoch % test_freq == 0):
 				loss = self.test_epoch(loaders['test'])
@@ -361,7 +363,7 @@ class VAE(nn.Module):
 			# Save the model.
 			if (save_freq is not None) and (epoch % save_freq == 0) and (epoch > 0):
 				filename = "checkpoint_"+str(epoch).zfill(3)+'.tar'
-				file_path = os.path.join(save_dir, filename) # this line was added, see if this is source of saving issue
+				file_path = os.path.join(save_dir, filename)
 				self.save_state(file_path)
 
 if __name__ == "__main__":
