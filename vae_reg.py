@@ -23,8 +23,6 @@ import umap
 import os
 import itertools
 from sklearn.decomposition import PCA # for PCA method
-#import pandas as pd
-#from scipy.stats import shapiro
 
 IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
@@ -133,8 +131,6 @@ class VAE(nn.Module):
 		h = F.relu(self.convt2(h))
 		h = F.relu(self.convt3(self.bnt3(h)))
 		h = F.relu(self.convt4(h))
-		#Umcomment if wanting to take out sigmoid constraint from last layer
-		#return self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM)
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
@@ -158,8 +154,7 @@ class VAE(nn.Module):
 			#z = torch.cat([id_oh, cov_oh], 1).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
 			diff = self.decode(zcat).view(x.shape[0], -1)
-			cons = torch.matmul(new_cov[:, i-1], diff)
-			#cons = torch.matmul(covariates[:,i-1], diff)
+			cons = torch.einsum('b,bx->bx', new_cov[:, i-1], diff) # using EinSum to preserve batch dim
 			x_rec = x_rec + cons
 			if i==1:
 				imgs['task']=cons.detach().cpu().numpy()
@@ -173,7 +168,6 @@ class VAE(nn.Module):
 		torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) + IMG_DIM * \
 		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
 		elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
-		#loss = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2))
 		if return_latent_rec:
 			return -elbo, z.detach().cpu().numpy(), imgs
 		return -elbo
@@ -299,28 +293,6 @@ class VAE(nn.Module):
 		components = pca.fit_transform(latents)
 		print("Number of components: {}".format(pca.n_components_))
 		print("Explained variance: {}".format(pca.explained_variance_))
-		# Commented old pieces -- unnecessary at this point
-		#components = pca.components_
-		#cols = ['PC{}'.format(i) for i in range(0, pca.n_components_)]
-		#principalDf = pd.DataFrame(data = components, columns = cols)
-		#col_names = principalDf.columns
-		#for i in range(len(cols)):
-		#	print("Component {} mean: {}".format(i, principalDf[cols[i]].mean()))
-		#print ("="*40)
-		#save latent means PCs to csv file
-		#principalDf.to_csv(csv_path)
-		#Test for Gaussianity using Shapiro-Wilkin's test
-		#In theory, PC themselves can be non-gaussian (so this step is not needed lol)
-		#print("Using Shapiro-Wilkin’s method to test if PCs are normally distributed")
-		#for i in range(len(cols)):
-		#	print(cols[i])
-		#	stat, p = shapiro(principalDf[cols[i]])
-		#	print('Statistics=%.3f, p=%.3f' % (stat, p))
-		#	alpha = 0.05
-		#	if p > alpha:
-		#		print('Sample looks Gaussian (fail to reject H0)')
-		#	else:
-		#		print('Sample does not look Gaussian (reject H0)')
 
 	def reconstruct(self, item, ref_nii, save_dir):
 		"""Reconstruct a volume and its cons given a dset idx."""
@@ -354,8 +326,8 @@ class VAE(nn.Module):
 			#Run through the training data and record a loss.
 			loss = self.train_epoch(loaders['train'])
 			self.loss['train'][epoch] = loss
-			#adding  PCA calc for each training epoch.
-			self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
+			#Uncomment if adding  PCA calc for each training epoch.
+			#self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
 			# Run through the test data and record a loss.
 			if (test_freq is not None) and (epoch % test_freq == 0):
 				loss = self.test_epoch(loaders['test'])
