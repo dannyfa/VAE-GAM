@@ -18,6 +18,7 @@ from torch.optim import Adam
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
+from torch.distributions.kl import kl_divergence
 from torch.distributions import LowRankMultivariateNormal
 import umap
 import os
@@ -27,8 +28,13 @@ from sklearn.decomposition import PCA # for PCA method
 IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
 
+
+
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_subjects=6, num_covariates=1, num_latents=32, model_precision=10.0, device_name="auto"):
+	"""VAE"""
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_subjects=6, \
+		num_covariates=1, num_latents=32, model_precision=10.0, \
+		device_name="auto"):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
@@ -49,7 +55,13 @@ class VAE(nn.Module):
 		self.optimizer = Adam(self.parameters(), lr=self.lr)
 		self.epoch = 0
 		self.loss = {'train':{}, 'test':{}}
+		# Define prior on Zs.
+		mean = torch.zeros(num_latents).to(self.device)
+		cov_factor = torch.zeros((num_latents,1)).to(self.device)
+		cov_diag = torch.ones(num_latents).to(self.device)
+		self.z_prior = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
 		self.to(self.device)
+
 
 	def _build_network(self):
 		# Encoder
@@ -85,21 +97,23 @@ class VAE(nn.Module):
 		self.bnt3 = nn.BatchNorm3d(2*self.nf)
 		self.bnt5 = nn.BatchNorm3d(self.nf)
 
+
 	def _get_layers(self):
 		"""Return a dictionary mapping names to network layers.
 		Again, adaptions here were minimal -- enough to match layers defined
 		in __build_network.
 		"""
 		return {'fc1':self.fc1, 'fc2':self.fc2, 'fc31':self.fc31,
-                'fc32':self.fc32, 'fc33':self.fc33, 'fc41':self.fc41,
-                'fc42':self.fc42, 'fc43':self.fc43, 'fc5':self.fc5,
-                'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8, 'bn1':self.bn1,
-                'bn3':self.bn3, 'bn5':self.bn5,'bnt1':self.bnt1, 'bnt3':self.bnt3,
-                'bnt5':self.bnt5, 'conv1':self.conv1,'conv2':self.conv2,
-                'conv3':self.conv3, 'conv4':self.conv4,
-                'conv5':self.conv5,'convt1':self.convt1, 'convt2':self.convt2,
-                'convt3':self.convt3, 'convt4':self.convt4,
-                'convt5':self.convt5}
+				'fc32':self.fc32, 'fc33':self.fc33, 'fc41':self.fc41,
+				'fc42':self.fc42, 'fc43':self.fc43, 'fc5':self.fc5,
+				'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8, 'bn1':self.bn1,
+				'bn3':self.bn3, 'bn5':self.bn5,'bnt1':self.bnt1, 'bnt3':self.bnt3,
+				'bnt5':self.bnt5, 'conv1':self.conv1,'conv2':self.conv2,
+				'conv3':self.conv3, 'conv4':self.conv4,
+				'conv5':self.conv5,'convt1':self.convt1, 'convt2':self.convt2,
+				'convt3':self.convt3, 'convt4':self.convt4,
+				'convt5':self.convt5}
+
 
 	def encode(self, x):
 		#modf so that outpout is in form mu, u, d
@@ -121,6 +135,7 @@ class VAE(nn.Module):
 		d = torch.exp(self.fc43(d)) # d must be positive.
 		return mu, u, d
 
+
 	def decode(self, z):
 		h = F.relu(self.fc5(z))
 		h = F.relu(self.fc6(h))
@@ -133,48 +148,93 @@ class VAE(nn.Module):
 		h = F.relu(self.convt4(h))
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
-	def forward(self, ids, covariates, x, return_latent_rec=False):
-		# creating dict to hold base, task cons and full reconstruction
-		imgs = {'base': {}, 'task': {}, 'full_rec': {}}
-		#getting z's using encoder
+
+	def forward(self, ids, covariates, x, return_latent_rec=False, \
+		capacity=25.0, gamma=1000.0):
+		"""
+		Send `x` round trip through the VAE.
+
+		Parameters
+		----------
+		ids :
+			subject ids, used for plotting later on 
+		covariates : torch Tensor
+			covariate values
+		x : torch Tensor
+			BOLD signal
+		return_latent_rec : bool
+			Whether to return latent samples and reconstructions.
+		capacity : float
+			Capacity of channel in nats.
+		gamma : float
+			Channel capacity penalty.
+
+		Returns
+		-------
+		loss : torch Tensor
+			Training loss.
+		elbo : torch Tensor
+			ELBO estimate
+		z : numpy.ndarray, if `return_latent_rec`
+			Latent samples.
+		img : dict, if `return_latent_rec`
+			Some reconstructions.
+		"""
+		# Get q(z|x)
 		mu, u, d = self.encode(x)
 		latent_dist = LowRankMultivariateNormal(mu, u, d)
+		kld = torch.sum(kl_divergence(latent_dist, self.z_prior))
+		elbo = -kld
+		# Eq. 7 in https://arxiv.org/pdf/1804.03599.pdf
+		mod_elbo = -gamma * torch.abs(kld - capacity)
+
+		# Sample z ~ q(z|x)
 		z = latent_dist.rsample()
-		#commenting subjID one-hot
-		#id_oh = torch.nn.functional.one_hot(ids, self.num_subjects)
-		base_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
-		base_oh = base_oh.to(self.device).float()
+
+		# Construct the baseline, part of p(x|z).
+		base_oh = torch.nn.functional.one_hot( \
+				torch.zeros(ids.shape[0], dtype=torch.int64), \
+				self.num_covariates+1).to(self.device).float()
 		zcat = torch.cat([z, base_oh], 1).float()
 		x_rec = self.decode(zcat).view(x.shape[0], -1)
-		imgs['base'] = x_rec.detach().cpu().numpy()
-		new_cov = covariates.unsqueeze(-1) # to get (batch_size, 1) tensor shape.
+		if return_latent_rec:
+			# Create dict to hold base, task cons, and full reconstruction.
+			imgs = {}
+			imgs['base'] = x_rec.detach().cpu().numpy()
+
+		# Add covariate effects, part of p(x|z).
+		new_cov = covariates.unsqueeze(-1) # (batch_size, 1)
 		for i in range(1,self.num_covariates+1):
-			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
+			cov_oh = torch.nn.functional.one_hot( \
+					i*torch.ones(ids.shape[0], dtype=torch.int64), \
+					self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
-			#z = torch.cat([id_oh, cov_oh], 1).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
 			diff = self.decode(zcat).view(x.shape[0], -1)
-			cons = torch.einsum('b,bx->bx', new_cov[:, i-1], diff) # using EinSum to preserve batch dim
+			# Use EinSum to preserve batch dim.
+			cons = torch.einsum('b,bx->bx', new_cov[:, i-1], diff)
 			x_rec = x_rec + cons
-			if i==1:
+			if return_latent_rec and i==1:
 				imgs['task']=cons.detach().cpu().numpy()
-		imgs['full_rec']=x_rec.detach().cpu().numpy()
-		#calculating loss
-		# swapped self.z_dim for self.num_latents on 1st term (makes more sense here)
-		# swapped self.z_dim for IMG_DIM on 2nd term since prob is over x
-		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
-		np.log(2*np.pi)) # B * p(z)
-		elbo = elbo + -0.5 * (self.model_precision * \
-		torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) + IMG_DIM * \
-		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
-		elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
 		if return_latent_rec:
-			return -elbo, z.detach().cpu().numpy(), imgs
-		return -elbo
+			imgs['full_rec']=x_rec.detach().cpu().numpy()
 
-	def train_epoch(self, train_loader):
+		# Update ELBO with E_{q(z|x)} log p(x|z)
+		pxz_term = -0.5 * IMG_DIM * (np.log(2*np.pi/self.model_precision))
+		l2s = torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2), dim=1)
+		pxz_term = pxz_term - 0.5 * self.model_precision * torch.sum(l2s)
+		elbo = elbo + pxz_term
+		mod_elbo = mod_elbo + pxz_term
+
+		# Return.
+		if return_latent_rec:
+			return -mod_elbo, elbo, z.detach().cpu().numpy(), imgs
+		return -mod_elbo, elbo
+
+
+	def train_epoch(self, train_loader, capacity):
 		self.train()
-		train_loss = 0.0
+		train_loss, train_elbo = 0.0, 0.0
 		for batch_idx, sample in enumerate(train_loader):
 			#Inputs now come from dataloader dicts
 			x = sample['volume']
@@ -183,15 +243,19 @@ class VAE(nn.Module):
 			covariates = covariates.to(self.device)
 			ids = sample['subjid']
 			ids = ids.to(self.device)
-			loss = self.forward(ids, covariates, x)
-			train_loss += loss.item()
 			self.optimizer.zero_grad()
+			loss, elbo = self.forward(ids, covariates, x, capacity=capacity)
+			train_loss += loss.item()
+			train_elbo += elbo.item()
 			loss.backward()
 			self.optimizer.step()
 		train_loss /= len(train_loader.dataset)
+		train_elbo /= len(train_loader.dataset)
 		print('Epoch: {} Average loss: {:.4f}'.format(self.epoch, train_loss))
+		print('Epoch: {} Average elbo: {:.4f}'.format(self.epoch, train_elbo))
 		self.epoch += 1
-		return train_loss
+		return train_loss, train_elbo
+
 
 	def test_epoch(self, test_loader):
 		self.eval()
@@ -204,11 +268,12 @@ class VAE(nn.Module):
 				covariates = covariates.to(self.device)
 				ids = sample['subjid']
 				ids = ids.to(self.device)
-				loss = self.forward(ids, covariates, x)
+				loss, _ = self.forward(ids, covariates, x)
 				test_loss += loss.item()
 		test_loss /= len(test_loader.dataset)
 		print('Test loss: {:.4f}'.format(test_loss))
 		return test_loss
+
 
 	def save_state(self, filename):
 		layers = self._get_layers()
@@ -223,6 +288,7 @@ class VAE(nn.Module):
 		state['save_dir'] = self.save_dir
 		filename = os.path.join(self.save_dir, filename)
 		torch.save(state, filename)
+
 
 	def load_state(self, filename):
 		checkpoint = torch.load(filename)
@@ -272,9 +338,13 @@ class VAE(nn.Module):
 		#Uncomment this if we actually wish to get latent and projections
 		#return latent, projection
 
-    # Adding new method to compute PCA for latent means.
-	# This can be done per epoch or after some training
+
 	def compute_PCA(self, loaders_dict, save_dir):
+		"""
+		Adding new method to compute PCA for latent means.
+
+		This can be done per epoch or after some training.
+		"""
 		csv_file = 'PCA_2n.csv'
 		csv_path = os.path.join(save_dir, csv_file)
 		latents = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
@@ -294,6 +364,7 @@ class VAE(nn.Module):
 		print("Number of components: {}".format(pca.n_components_))
 		print("Explained variance: {}".format(pca.explained_variance_))
 
+
 	def reconstruct(self, item, ref_nii, save_dir):
 		"""Reconstruct a volume and its cons given a dset idx."""
 		x = item['volume'].unsqueeze(0)
@@ -303,7 +374,7 @@ class VAE(nn.Module):
 		ids = item['subjid'].view(1)
 		ids = ids.to(self.device)
 		with torch.no_grad():
-			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and cons
+			_, _, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and cons
 			for key in imgs.keys():
 				filename = 'recon_{}.nii'.format(key)
 				filepath = os.path.join(save_dir, filename)
@@ -315,7 +386,21 @@ class VAE(nn.Module):
 				recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
 				nib.save(recon_nifti, filepath)
 
-	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
+	def capacity_schedule(self, epoch, burnin=30, max_val=50.0, ramp_epochs=200):
+		"""
+		Given an epoch, returns the capacity of the channel.
+		Taken from Jack's toy example.
+		"""
+
+		return max(0, (epoch - burnin) / ramp_epochs * max_val)
+
+
+	def train_loop(self, loaders, epochs=100, test_freq=2, \
+		save_freq=10, save_dir=''):
+		"""
+		Run through training epochs.
+
+		"""
 		print("="*40)
 		print("Training: epochs", self.epoch, "to", self.epoch+epochs-1)
 		print("Training set:", len(loaders['train'].dataset))
@@ -323,11 +408,12 @@ class VAE(nn.Module):
 		print("="*40)
 		# For some number of epochs...
 		for epoch in range(self.epoch, self.epoch+epochs):
-			#Run through the training data and record a loss.
-			loss = self.train_epoch(loaders['train'])
+			# Run through the training data and record a loss.
+			capacity = self.capacity_schedule(epoch)
+			loss, _ = self.train_epoch(loaders['train'], capacity)
 			self.loss['train'][epoch] = loss
-			#Uncomment if adding  PCA calc for each training epoch.
-			#self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
+			# Uncomment if adding  PCA calc for each training epoch.
+			# self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
 			# Run through the test data and record a loss.
 			if (test_freq is not None) and (epoch % test_freq == 0):
 				loss = self.test_epoch(loaders['test'])
@@ -338,5 +424,10 @@ class VAE(nn.Module):
 				file_path = os.path.join(save_dir, filename)
 				self.save_state(file_path)
 
+
+
 if __name__ == "__main__":
 	pass
+
+
+###
