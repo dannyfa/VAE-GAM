@@ -46,5 +46,4 @@ for file in chckpt_files:
     model.load_state(filename = file)
     unique_dir = os.path.join(args.save_dir, file[:-4])
     os.makedirs(unique_dir)
-    print(unique_dir)
     model.reconstruct(item, ref_nii=args.ref_nii, save_dir=unique_dir)

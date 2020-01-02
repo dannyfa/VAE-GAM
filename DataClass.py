@@ -32,7 +32,7 @@ class FMRIDataset(Dataset):
         age = self.df.iloc[idx,4]
         sex = self.df.iloc[idx,5]
         task = self.df.iloc[idx,6]
-        #uncomment only if wishing to make task var zero for all entries 
+        #uncomment only if wishing to make task var zero for all entries
         #task = self.df.iloc[fix_id,6]
         nii = self.df.iloc[idx,3]
         vol_num = self.df.iloc[idx,2]
@@ -43,7 +43,7 @@ class FMRIDataset(Dataset):
         flat_vol = volume.flatten()
         norm_vol = np.true_divide(flat_vol, max).reshape(41,49,35)
         sample = {'subjid': subj_idx, 'volume': norm_vol,
-                      'age': age, 'sex': sex, "task":task}
+                      'age': age, 'sex': sex, "task":task, 'subj': subjid}
         if self.transform:
             sample = self.transform(sample)
 
