@@ -5,9 +5,9 @@ import pandas as pd
 import DataClass as data
 
 #set up paths to data, ref_nii and saving dir
-csv_file = '/home/dfd4/fmri_vae/resampled/preproc_dset.csv'
-ref_nii = '/home/dfd4/fmri_vae/resampled/sub-A00057808_resampled.nii.gz'
-save_dir = '/home/dfd4/fmri_vae/resampled/avgs'
+csv_file = '/home/dfd4/fmri_vae/new_preproc_dset/preproc_dset.csv'
+ref_nii = '/home/rachaelwright/fmri_sample_data/checkerboard_and_breathhold/sub-A00057808/ses-NFB2/func/wrsub-A00057808_ses-NFB2_task-CHECKERBOARD_acq-1400_bold.nii'
+save_dir = '/home/dfd4/fmri_vae/new_preproc_dset/manual_avgs'
 
 data = data.FMRIDataset(csv_file = csv_file) # no need to make it into tensor
 #getting subj ids and ref nii
@@ -24,6 +24,8 @@ for i in range(data.__len__()):
         all_task_vols.append(item['volume'])
     else:
         all_notask_vols.append(item['volume'])
+#print(len(all_task_vols))
+#print(len(all_notask_vols))
 base = np.zeros((41, 49, 35),np.float)
 for vol in all_task_vols:
     grand_sum = base + vol

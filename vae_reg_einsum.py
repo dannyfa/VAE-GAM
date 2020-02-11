@@ -28,7 +28,7 @@ IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_subjects=6, num_covariates=1, num_latents=32, model_precision=10.0, device_name="auto"):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=1, num_latents=32, model_precision=10.0, device_name="auto"):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
