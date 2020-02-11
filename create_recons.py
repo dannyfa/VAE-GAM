@@ -1,3 +1,9 @@
+"""
+Short script to reconstruct all vols from all subjs using a pre-trained model
+Needs more flexiblity and some polishing in code
+But otherwise works fine 
+"""
+
 import os
 import numpy as np
 import nibabel as nib
@@ -8,7 +14,7 @@ import vae_reg
 #set up paths to data, ref_nii and saving dir
 csv_file = '/home/dfd4/fmri_vae/new_preproc_dset/preproc_dset.csv'
 ref_nii = '/home/rachaelwright/fmri_sample_data/checkerboard_and_breathhold/sub-A00057808/ses-NFB2/func/wrsub-A00057808_ses-NFB2_task-CHECKERBOARD_acq-1400_bold.nii'
-out_dir = '/home/dfd4/fmri_vae/new_preproc_dset/model_recon_avgs'
+out_dir = '/home/dfd4/fmri_vae/new_preproc_dset/model_recons'
 
 #create a dset and model objs for reconstruction
 data = data.FMRIDataset(csv_file = csv_file, transform = data.ToTensor())
@@ -21,14 +27,18 @@ subjs = dset.subjid.unique().tolist()
 input_nifti = nib.load(ref_nii)
 
 for i in range(len(subjs)):
-    #create subj dir to store recons for subj vols
+    #create subj dirs to store recons for individual subj vols
     save_dir = os.path.join(out_dir, subjs[i])
-    #Generate model reconstructions for each subj and vol..
+    os.makedirs(save_dir)
+    #Generate model reconstructions for each vol and each subj
     for idx in range(data.__len__()):
-        item = data.__getitem__(idx)
-        vol_num = dset.iloc[idx,2]
-        task = dset.iloc[idx,6]
-        ext = str(vol_num) + '_' + str(task) #create a file ext. w/ vol_num and task
-        filepath = os.path.join(save_dir, ext)
-        os.makedirs(filepath) #mk sure path actually exists  
-        model.reconstruct(item, ref_nii= input_nii, save_dir= filepath)
+        if dset.iloc[idx, 1] == subjs[i]:
+            item = data.__getitem__(idx)
+            vol_num = dset.iloc[idx,2]
+            task = dset.iloc[idx,6]
+            ext = str(vol_num) + '_' + str(task) #create a file ext. w/ vol_num and task
+            filepath = os.path.join(save_dir, ext)
+            os.makedirs(filepath)
+            model.reconstruct(item, ref_nii= ref_nii, save_dir= filepath)
+        else:
+            pass
