@@ -28,12 +28,10 @@ class FMRIDataset(Dataset):
         unique_subjs = self.df.subjid.unique().tolist()
         subjid = self.df.iloc[idx,1]
         subj_idx = unique_subjs.index(subjid)
-        fix_id = 0 # fixed id w/ task ==0
         age = self.df.iloc[idx,4]
         sex = self.df.iloc[idx,5]
         task = self.df.iloc[idx,6]
-        #uncomment only if wishing to make task var zero for all entries
-        #task = self.df.iloc[fix_id,6]
+        task_bin = self.df.iloc[idx,7]
         nii = self.df.iloc[idx,3]
         vol_num = self.df.iloc[idx,2]
         fmri = np.array(nib.load(nii).dataobj)
@@ -43,7 +41,8 @@ class FMRIDataset(Dataset):
         flat_vol = volume.flatten()
         norm_vol = np.true_divide(flat_vol, max).reshape(41,49,35)
         sample = {'subjid': subj_idx, 'volume': norm_vol,
-                      'age': age, 'sex': sex, "task":task, 'subj': subjid}
+                      'age': age, 'sex': sex, 'task':task, 
+                      'subj': subjid, 'task_bin':task_bin}
         if self.transform:
             sample = self.transform(sample)
 

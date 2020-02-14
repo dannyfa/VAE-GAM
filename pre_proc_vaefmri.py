@@ -13,6 +13,8 @@ import nibabel as nib
 import numpy as np
 import argparse
 from sklearn import preprocessing # for norm step
+import scipy.stats
+from scipy.stats import gamma # for HRF funct
 
 parser = argparse.ArgumentParser(description='user args for fMRIvae preproc')
 
@@ -89,6 +91,40 @@ normalized_age = preprocessing.normalize([age_array]).tolist()[0]
 raw_df = {'nii_files': raw_data_files, 'subjs': subjs, 'age': normalized_age, 'sex': sex_bin}
 raw_df = pd.DataFrame(raw_df)
 
+#def HRF funct.
+#this yields a function form that is very similar to Glover's canonical HRF
+def hrf(times):
+    """ Return values for HRF at given times """
+    # Gamma pdf for the peak
+    peak_values = gamma.pdf(times, 6)
+    # Gamma pdf for the undershoot
+    undershoot_values = gamma.pdf(times, 12)
+    # Combine them
+    values = peak_values - 0.35 * undershoot_values
+    # Scale max to 0.6
+    return values / np.max(values) * 0.6
+
+#get hrf vals for each block, assuming sampling rate==TR
+#TR is 1.4s and block len is 20s for checker dset
+TR=1.4
+tr_times = np.arange(0, 20, TR)
+hrf_at_trs = hrf(tr_times)
+
+#set up function to convert vol acquisition times to stimulus responses
+#should yield a boxcar like function w/ box length = block duration
+def stimulus_to_neural(vol_times):
+    t = vol_times//20
+    res = []
+    for i in t:
+        if i==0:
+            task=0
+        elif i%2==0:
+            task=0
+        elif i%2!=0:
+            task=1
+        res.append(task)
+    return(np.array(res))
+
 #Building csv file
 samples = []
 for i in raw_df['subjs']:
@@ -97,19 +133,21 @@ for i in raw_df['subjs']:
     age = raw_df.loc[raw_df['subjs'] == i, 'age'].iloc[0]
     sex = raw_df.loc[raw_df['subjs'] == i, 'sex'].iloc[0]
     raw_nii = raw_df.loc[raw_df['subjs'] == i, 'nii_files'].iloc[0]
-    # getting vol # and task condition from nii  files
+    # load fmri dset
     fmri = np.array(nib.load(raw_nii).dataobj)
-    for vol in range(fmri.shape[3]):
-        time_on_task = (vol+1)*1.4
-        t = time_on_task//20
-        if t==0:
-            task=0
-        elif t%2==0:
-            task=0
-        elif t%2!=0:
-            task=1
-        sample = (subjid, vol, raw_nii, age, sex, task)
+    #Get vol stimulus response vals to convolve w/ HRF
+    vols = fmri.shape[3]
+    vol_times = np.arange(1, vols +1) * TR
+    neural = stimulus_to_neural(vol_times)
+    #perform convolution to get real-valued task values
+    convolved = np.convolve(neural, hrf_at_trs)
+    #get last/edge element out
+    n_to_remove = len(hrf_at_trs) - 1
+    convolved = convolved[:-n_to_remove]
+    #build samples
+    for vol in range(vols):
+        sample = (subjid, vol, raw_nii, age, sex, convolved[vol], neural[vol])
         samples.append(sample)
-new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task"])
+new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", "task_bin"])
 save_path = os.path.join(args.save_dir, 'preproc_dset.csv')
 new_df.to_csv(save_path)

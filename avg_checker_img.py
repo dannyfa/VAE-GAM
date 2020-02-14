@@ -20,7 +20,7 @@ all_task_vols = []
 all_notask_vols = []
 for i in range(data.__len__()):
     item = data.__getitem__(i)
-    if item['task'] == 1:
+    if item['task_bin'] == 1:
         all_task_vols.append(item['volume'])
     else:
         all_notask_vols.append(item['volume'])
@@ -51,9 +51,9 @@ for subj in subjs:
     subj_notaskvols = []
     for i in range(data.__len__()):
         item = data.__getitem__(i)
-        if item['subj'] == subj and item['task']== 1:
+        if item['subj'] == subj and item['task_bin']== 1:
             subj_taskvols.append(item['volume'])
-        elif item['subj'] == subj and item['task']==0:
+        elif item['subj'] == subj and item['task_bin']==0:
             subj_notaskvols.append(item['volume'])
         else:
             pass

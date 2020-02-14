@@ -1,7 +1,7 @@
 """
 Short script to reconstruct all vols from all subjs using a pre-trained model
 Needs more flexiblity and some polishing in code
-But otherwise works fine 
+But otherwise works fine
 """
 
 import os
@@ -14,12 +14,12 @@ import vae_reg
 #set up paths to data, ref_nii and saving dir
 csv_file = '/home/dfd4/fmri_vae/new_preproc_dset/preproc_dset.csv'
 ref_nii = '/home/rachaelwright/fmri_sample_data/checkerboard_and_breathhold/sub-A00057808/ses-NFB2/func/wrsub-A00057808_ses-NFB2_task-CHECKERBOARD_acq-1400_bold.nii'
-out_dir = '/home/dfd4/fmri_vae/new_preproc_dset/model_recons'
+out_dir = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recons'
 
 #create a dset and model objs for reconstruction
 data = data.FMRIDataset(csv_file = csv_file, transform = data.ToTensor())
 model = vae_reg.VAE()
-model.load_state(filename ='/home/dfd4/fmri_vae/new_preproc_dset/100epochs_newpreproc/checkpoint_100.tar')
+model.load_state(filename ='/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/checkpoint_1000.tar')
 
 #get subjids and ref nii
 dset = pd.read_csv(csv_file)
@@ -35,8 +35,8 @@ for i in range(len(subjs)):
         if dset.iloc[idx, 1] == subjs[i]:
             item = data.__getitem__(idx)
             vol_num = dset.iloc[idx,2]
-            task = dset.iloc[idx,6]
-            ext = str(vol_num) + '_' + str(task) #create a file ext. w/ vol_num and task
+            task_bin = dset.iloc[idx,7] # changed for task binary var
+            ext = str(vol_num) + '_' + str(task_bin) #create a file ext. w/ vol_num and task
             filepath = os.path.join(save_dir, ext)
             os.makedirs(filepath)
             model.reconstruct(item, ref_nii= ref_nii, save_dir= filepath)

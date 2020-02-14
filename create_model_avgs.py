@@ -5,19 +5,19 @@ Written on Feb 11-2020
 
 ToDo's
 Make code less redundant
-Debug it
 
 """
+
 import os
 import numpy as np
 import nibabel as nib
 import re
 
 #set up paths to data, ref_nii and saving dir
-data_root = '/home/dfd4/fmri_vae/new_preproc_dset/model_recons'
+data_root = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recons/'
 #am using same ref file for entire process
 ref_nii = '/home/rachaelwright/fmri_sample_data/checkerboard_and_breathhold/sub-A00057808/ses-NFB2/func/wrsub-A00057808_ses-NFB2_task-CHECKERBOARD_acq-1400_bold.nii'
-save_dir = '/home/dfd4/fmri_vae/new_preproc_dset/model_recon_avgs'
+save_dir = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recon_avgs'
 
 
 #getting input nii file
@@ -31,6 +31,8 @@ for i in range(len(dirs)):
         subjs.append(dirs[i])
 
 #set up zero arrs for grand avgs
+#might be useful to look at task_bin separately and at base vs. contrast alone
+#gd_base, gd_cons = np.zeros((41, 49, 35),np.float), np.zeros((41, 49, 35),np.float)
 gd_task_base, gd_task_cons = np.zeros((41, 49, 35),np.float), np.zeros((41, 49, 35),np.float)
 gd_notask_base, gd_notask_cons = np.zeros((41, 49, 35),np.float), np.zeros((41, 49, 35),np.float)
 
@@ -39,6 +41,7 @@ for subj in subjs:
     subj_dir = os.path.join(data_root, subj)
     subj_vol_dirs = os.listdir(subj_dir)
     #set up zero arr for subj avgs
+    #subj_base, subj_cons = np.zeros((41, 49, 35),np.float), np.zeros((41, 49, 35),np.float)
     subj_task_base, subj_task_cons = np.zeros((41, 49, 35),np.float), np.zeros((41, 49, 35),np.float)
     subj_notask_base, subj_notask_cons = np.zeros((41, 49, 35),np.float), np.zeros((41, 49, 35),np.float)
     #counter for num of task vols
@@ -46,6 +49,8 @@ for subj in subjs:
     for j in subj_vol_dirs:
         volbase_path, volcons_path = os.path.join(subj_dir, j, 'recon_base.nii'), os.path.join(subj_dir, j, 'recon_task.nii')
         volbase, volcons = np.array(nib.load(volbase_path).dataobj), np.array(nib.load(volcons_path).dataobj)
+    #    subj_base += volbase
+    #    subj_cons += volcons
         if j[-1] == '1': #this is a task vol
             subj_task_base += volbase
             subj_task_cons += volcons
@@ -56,6 +61,8 @@ for subj in subjs:
             subj_notask_cons += volcons
 
     #add subj level sums to grand sums
+    #gd_base += subj_base
+    #gd_cons += subj_cons
     #task
     gd_task_base += subj_task_base
     gd_task_cons += subj_task_cons
@@ -67,12 +74,22 @@ for subj in subjs:
     notask_vols = len(subj_vol_dirs)-task_vols
     subj_task_baseavg, subj_task_consavg = subj_task_base/task_vols, subj_task_cons/task_vols
     subj_notask_baseavg, subj_notask_consavg = subj_notask_base/notask_vols, subj_notask_cons/notask_vols
+    #subj_baseavg, subj_consavg = subj_base/len(subj_vol_dirs), subj_cons/len(subj_vol_dirs)
+
     #mk these into nifti files
     subj_task_baseavg_nii = nib.Nifti1Image(subj_task_baseavg, input_nifti.affine, input_nifti.header)
     subj_task_consavg_nii = nib.Nifti1Image(subj_task_consavg, input_nifti.affine, input_nifti.header)
     subj_notask_baseavg_nii = nib.Nifti1Image(subj_notask_baseavg, input_nifti.affine, input_nifti.header)
     subj_notask_consavg_nii = nib.Nifti1Image(subj_notask_consavg, input_nifti.affine, input_nifti.header)
+
+    #subj_baseavg_nii = nib.Nifti1Image(subj_baseavg, input_nifti.affine, input_nifti.header)
+    #subj_consavg_nii = nib.Nifti1Image(subj_consavg, input_nifti.affine, input_nifti.header)
+
     #save them
+    #filepath_subj_baseavg = os.path.join(save_dir, '{}_baseavg.nii'.format(subj))
+    #nib.save(subj_baseavg_nii, filepath_subj_baseavg)
+    #filepath_subj_consavg = os.path.join(save_dir, '{}_consavg.nii'.format(subj))
+    #nib.save(subj_consavg_nii, filepath_subj_consavg)
     #task ones
     filepath_subj_task_baseavg = os.path.join(save_dir, '{}_task_baseavg.nii'.format(subj))
     nib.save(subj_task_baseavg_nii, filepath_subj_task_baseavg)
@@ -90,13 +107,24 @@ total_notask_vols = (98 - task_vols)*len(subjs) #for total of 98 vols per subj
 task_baseavg, task_consavg = gd_task_base/total_task_vols, gd_task_cons/total_task_vols
 notask_baseavg, notask_consavg = gd_notask_base/total_notask_vols, gd_notask_cons/total_notask_vols
 
+#total_vols = len(subj_vol_dirs)*len(subjs)
+#baseavg, consavg = gd_base/total_vols, gd_cons/total_vols
+
 #now save grand avgs to nii
+#baseavg_nii = nib.Nifti1Image(baseavg, input_nifti.affine, input_nifti.header)
+#consavg_nii = nib.Nifti1Image(consavg, input_nifti.affine, input_nifti.header)
+
 task_baseavg_nii = nib.Nifti1Image(task_baseavg, input_nifti.affine, input_nifti.header)
 task_consavg_nii = nib.Nifti1Image(task_consavg, input_nifti.affine, input_nifti.header)
 notask_baseavg_nii = nib.Nifti1Image(notask_baseavg, input_nifti.affine, input_nifti.header)
 notask_consavg_nii = nib.Nifti1Image(notask_consavg, input_nifti.affine, input_nifti.header)
 
 #and save these to actual files
+#filepath_baseavg = os.path.join(save_dir, 'baseavg.nii')
+#nib.save(baseavg_nii, filepath_baseavg)
+#filepath_consavg = os.path.join(save_dir, 'consavg.nii')
+#nib.save(consavg_nii, filepath_consavg)
+
 #task ones
 filepath_task_baseavg = os.path.join(save_dir, 'task_baseavg.nii')
 nib.save(task_baseavg_nii, filepath_task_baseavg)
