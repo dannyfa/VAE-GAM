@@ -1,12 +1,16 @@
 """
-Z-based fMRIVAE regression model w/ covariate task (checkerboard ==1  vs. fixation ==0 in this case)
+Z-based fMRIVAE regression model w/ covariate task as a real variable (i.e, boxcar * HRF)
+Added single voxel noise modeling as well using epsilon param
 
-December 2019
+Feb 2020
+
+ToDos
+- Make it more readable
+- Improve documentation
+- Implement new save and load state methods
+- Add time dependent latent space var plotting
+
 """
-#uncomment if using matplotlib 3.0 & python3.5 versions
-#import matplotlib
-#matplotlib.use('agg')
-#import matplotlib.pyplot as plt
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
 import nibabel as nib
@@ -22,9 +26,9 @@ from torch.distributions import LowRankMultivariateNormal
 import umap
 import os
 import itertools
-from sklearn.decomposition import PCA # for PCA method
+from sklearn.decomposition import PCA
 
-IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data
+IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data on preprocessing
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
@@ -33,12 +37,10 @@ class VAE(nn.Module):
 		self.nf = nf
 		self.save_dir = save_dir
 		self.lr = lr
-		#self.num_subjects = num_subjects
 		self.num_covariates = num_covariates
 		self.num_latents = num_latents
-		#self.z_dim = num_subjects + num_covariates + 1 # add one extra dim for base map
 		self.z_dim = self.num_latents + self.num_covariates + 1
-		self.model_precision = model_precision
+		self.model_precision = model_precision #take it out once I run some tests
 		assert device_name != "cuda" or torch.cuda.is_available()
 		if device_name == "auto":
 			device_name = "cuda" if torch.cuda.is_available() else "cpu"
@@ -46,6 +48,11 @@ class VAE(nn.Module):
 		if self.save_dir != '' and not os.path.exists(self.save_dir):
 			os.makedirs(self.save_dir)
 		self._build_network()
+		#init epsilon param for masking
+		# -log(10) term accounts for removing model_precision term
+		epsilon = (-1)*np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64)
+		#epsilon = torch.zeros([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64)
+		self.epsilon = torch.nn.Parameter(epsilon).to(self.device)
 		self.optimizer = Adam(self.parameters(), lr=self.lr)
 		self.epoch = 0
 		self.loss = {'train':{}, 'test':{}}
@@ -71,8 +78,7 @@ class VAE(nn.Module):
 		self.fc43 = nn.Linear(50, self.num_latents)
 
 		#Decoder
-		# In future, implement more flexibility when choosing nn params
-		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be z+k+1. Here should be 36 - 32 z's + 3 covariates + base.
+		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be z+k+1. Here should be 34 - 32 z's + 1 covariate + base.
 		self.fc6 = nn.Linear(50, 100)
 		self.fc7 = nn.Linear(100, 200)
 		self.fc8 = nn.Linear(200, 2*self.nf*6*8*5)
@@ -102,9 +108,7 @@ class VAE(nn.Module):
                 'convt5':self.convt5}
 
 	def encode(self, x):
-		#modf so that outpout is in form mu, u, d
-		#will try subst. view for squeeze in some pieces here
-		x = x.view(-1,1,IMG_SHAPE[0],IMG_SHAPE[1],IMG_SHAPE[2]) # better to use unsqueeze?
+		x = x.view(-1,1,IMG_SHAPE[0],IMG_SHAPE[1],IMG_SHAPE[2])
 		h = F.relu(self.conv1(self.bn1(x)))
 		h = F.relu(self.conv2(h))
 		h = F.relu(self.conv3(self.bn3(h)))
@@ -134,24 +138,22 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
+		#make this method more readable
 		# creating dict to hold base, task cons and full reconstruction
 		imgs = {'base': {}, 'task': {}, 'full_rec': {}}
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
 		latent_dist = LowRankMultivariateNormal(mu, u, d)
 		z = latent_dist.rsample()
-		#commenting subjID one-hot
-		#id_oh = torch.nn.functional.one_hot(ids, self.num_subjects)
 		base_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
 		base_oh = base_oh.to(self.device).float()
 		zcat = torch.cat([z, base_oh], 1).float()
 		x_rec = self.decode(zcat).view(x.shape[0], -1)
 		imgs['base'] = x_rec.detach().cpu().numpy()
-		new_cov = covariates.unsqueeze(-1) # to get (batch_size, 1) tensor shape.
+		new_cov = covariates.unsqueeze(-1) # to get (batch_size, 1) shape.
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
-			#z = torch.cat([id_oh, cov_oh], 1).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
 			diff = self.decode(zcat).view(x.shape[0], -1)
 			cons = torch.einsum('b,bx->bx', new_cov[:, i-1], diff) # using EinSum to preserve batch dim
@@ -164,9 +166,14 @@ class VAE(nn.Module):
 		# swapped self.z_dim for IMG_DIM on 2nd term since prob is over x
 		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
 		np.log(2*np.pi)) # B * p(z)
-		elbo = elbo + -0.5 * (self.model_precision * \
-		torch.sum(torch.pow(x.view(x.shape[0],-1) - x_rec, 2)) + IMG_DIM * \
+		x_diff = x.view(x.shape[0], -1) - x_rec
+		x_diff = torch.einsum('bi,i->bi', x_diff.view(x.shape[0],-1), torch.exp(-self.epsilon.view(-1).float()))
+		elbo = elbo + -0.5 * (torch.sum(torch.pow(x_diff, 2)) + IMG_DIM * \
 		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
+		#this is old version
+		#elbo = elbo + -0.5 * (self.model_precision * \
+		#torch.sum(torch.pow(x_diff, 2)) + IMG_DIM * \
+		#np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
 		elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
 		if return_latent_rec:
 			return -elbo, z.detach().cpu().numpy(), imgs
@@ -210,6 +217,8 @@ class VAE(nn.Module):
 		print('Test loss: {:.4f}'.format(test_loss))
 		return test_loss
 
+#Check out newer save and load methods Jack mentioned
+#these will likely be useful here
 	def save_state(self, filename):
 		layers = self._get_layers()
 		state = {}
@@ -221,6 +230,7 @@ class VAE(nn.Module):
 		state['epoch'] = self.epoch
 		state['lr'] = self.lr
 		state['save_dir'] = self.save_dir
+		state['epsilon'] = self.epsilon
 		filename = os.path.join(self.save_dir, filename)
 		torch.save(state, filename)
 
@@ -234,7 +244,7 @@ class VAE(nn.Module):
 		self.optimizer.load_state_dict(checkpoint['optimizer_state'])
 		self.loss = checkpoint['loss']
 		self.epoch = checkpoint['epoch']
-
+		self.epsilon = checkpoint['epsilon']
 
 	def project_latent(self, loaders_dict, save_dir, title=None, split=98):
 		# plotting only test set since this is un-shuffled. Will plot by subjid in future to overcome this limitation
