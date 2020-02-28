@@ -13,10 +13,10 @@ import nibabel as nib
 import re
 
 #set up paths to data, ref_nii and saving dir
-data_root = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recons/'
+data_root = '/home/dfd4/fmri_vae/new_preproc_dset/20000_epsilon_noMP/1000epochs_model_recons'
 #am using same ref file for entire process
 ref_nii = '/home/rachaelwright/fmri_sample_data/checkerboard_and_breathhold/sub-A00057808/ses-NFB2/func/wrsub-A00057808_ses-NFB2_task-CHECKERBOARD_acq-1400_bold.nii'
-save_dir = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recon_avgs'
+save_dir = '/home/dfd4/fmri_vae/new_preproc_dset/20000_epsilon_noMP/1000epochs_model_recon_avgs'
 
 
 #getting input nii file

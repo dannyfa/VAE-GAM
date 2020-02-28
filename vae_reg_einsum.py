@@ -9,8 +9,8 @@ ToDos
 - Improve documentation
 - Implement new save and load state methods
 - Add time dependent latent space var plotting
-
 """
+
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
 import nibabel as nib
@@ -47,12 +47,11 @@ class VAE(nn.Module):
 			self.device = torch.device(device_name)
 		if self.save_dir != '' and not os.path.exists(self.save_dir):
 			os.makedirs(self.save_dir)
-		self._build_network()
 		#init epsilon param for masking
 		# -log(10) term accounts for removing model_precision term
-		epsilon = (-1)*np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64)
-		#epsilon = torch.zeros([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64)
-		self.epsilon = torch.nn.Parameter(epsilon).to(self.device)
+		epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
+		self.epsilon = torch.nn.Parameter(epsilon)
+		self._build_network()
 		self.optimizer = Adam(self.parameters(), lr=self.lr)
 		self.epoch = 0
 		self.loss = {'train':{}, 'test':{}}
@@ -138,8 +137,6 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
-		#make this method more readable
-		# creating dict to hold base, task cons and full reconstruction
 		imgs = {'base': {}, 'task': {}, 'full_rec': {}}
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
@@ -162,18 +159,12 @@ class VAE(nn.Module):
 				imgs['task']=cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
 		#calculating loss
-		# swapped self.z_dim for self.num_latents on 1st term (makes more sense here)
-		# swapped self.z_dim for IMG_DIM on 2nd term since prob is over x
 		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
 		np.log(2*np.pi)) # B * p(z)
 		x_diff = x.view(x.shape[0], -1) - x_rec
 		x_diff = torch.einsum('bi,i->bi', x_diff.view(x.shape[0],-1), torch.exp(-self.epsilon.view(-1).float()))
 		elbo = elbo + -0.5 * (torch.sum(torch.pow(x_diff, 2)) + IMG_DIM * \
 		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
-		#this is old version
-		#elbo = elbo + -0.5 * (self.model_precision * \
-		#torch.sum(torch.pow(x_diff, 2)) + IMG_DIM * \
-		#np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
 		elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
 		if return_latent_rec:
 			return -elbo, z.detach().cpu().numpy(), imgs

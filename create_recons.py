@@ -12,14 +12,14 @@ import DataClass as data
 import vae_reg
 
 #set up paths to data, ref_nii and saving dir
-csv_file = '/home/dfd4/fmri_vae/new_preproc_dset/preproc_dset.csv'
+csv_file = '/home/dfd4/fmri_vae/new_preproc_dset/preproc_dset_wHRF.csv'
 ref_nii = '/home/rachaelwright/fmri_sample_data/checkerboard_and_breathhold/sub-A00057808/ses-NFB2/func/wrsub-A00057808_ses-NFB2_task-CHECKERBOARD_acq-1400_bold.nii'
-out_dir = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recons'
+out_dir = '/home/dfd4/fmri_vae/new_preproc_dset/20000_epsilon_noMP/10000epochs_model_recons'
 
 #create a dset and model objs for reconstruction
 data = data.FMRIDataset(csv_file = csv_file, transform = data.ToTensor())
 model = vae_reg.VAE()
-model.load_state(filename ='/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/checkpoint_1000.tar')
+model.load_state(filename ='/home/dfd4/fmri_vae/new_preproc_dset/20000_epsilon_noMP/checkpoint_10000.tar')
 
 #get subjids and ref nii
 dset = pd.read_csv(csv_file)
