@@ -1,10 +1,11 @@
 """
 Z-based fMRIVAE regression model w/ covariate task as a real variable (i.e, boxcar * HRF)
 Added single voxel noise modeling as well using epsilon param
+Added motion params in 6 degrees of freedom as regressors of no interest
+This should help clean up contrast maps.
 
-Feb 2020
-
-ToDos
+March 2020
+ToDos (once we have dencent cons maps)
 - Make it more readable
 - Improve documentation
 - Implement new save and load state methods
@@ -32,7 +33,7 @@ IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data on pr
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=1, num_latents=32, model_precision=10.0, device_name="auto"):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto"):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
@@ -40,7 +41,6 @@ class VAE(nn.Module):
 		self.num_covariates = num_covariates
 		self.num_latents = num_latents
 		self.z_dim = self.num_latents + self.num_covariates + 1
-		self.model_precision = model_precision #take it out once I run some tests
 		assert device_name != "cuda" or torch.cuda.is_available()
 		if device_name == "auto":
 			device_name = "cuda" if torch.cuda.is_available() else "cpu"
@@ -48,7 +48,7 @@ class VAE(nn.Module):
 		if self.save_dir != '' and not os.path.exists(self.save_dir):
 			os.makedirs(self.save_dir)
 		#init epsilon param for masking
-		# -log(10) term accounts for removing model_precision term
+		# -log(10) term accounts for removing model_precision term from original
 		epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
 		self.epsilon = torch.nn.Parameter(epsilon)
 		self._build_network()
@@ -77,7 +77,7 @@ class VAE(nn.Module):
 		self.fc43 = nn.Linear(50, self.num_latents)
 
 		#Decoder
-		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be z+k+1. Here should be 34 - 32 z's + 1 covariate + base.
+		self.fc5 = nn.Linear(self.z_dim, 50) # z_dim would be z+k+1. Here should be 40 - 32 z's + 7 covariate + base.
 		self.fc6 = nn.Linear(50, 100)
 		self.fc7 = nn.Linear(100, 200)
 		self.fc8 = nn.Linear(200, 2*self.nf*6*8*5)
@@ -137,7 +137,8 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
-		imgs = {'base': {}, 'task': {}, 'full_rec': {}}
+		imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
+		'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
 		latent_dist = LowRankMultivariateNormal(mu, u, d)
@@ -147,16 +148,17 @@ class VAE(nn.Module):
 		zcat = torch.cat([z, base_oh], 1).float()
 		x_rec = self.decode(zcat).view(x.shape[0], -1)
 		imgs['base'] = x_rec.detach().cpu().numpy()
-		new_cov = covariates.unsqueeze(-1) # to get (batch_size, 1) shape.
+		#new_cov = covariates.unsqueeze(-1) #if covar is singleton, use to add batch_dim
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
 			diff = self.decode(zcat).view(x.shape[0], -1)
-			cons = torch.einsum('b,bx->bx', new_cov[:, i-1], diff) # using EinSum to preserve batch dim
+			cons = torch.einsum('b,bx->bx', covariates[:, i-1], diff) # using EinSum to preserve batch dim
 			x_rec = x_rec + cons
-			if i==1:
-				imgs['task']=cons.detach().cpu().numpy()
+			#now get maps
+			keys = list(imgs.keys())
+			imgs[keys[i]] = cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
 		#calculating loss
 		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
@@ -304,7 +306,7 @@ class VAE(nn.Module):
 		ids = item['subjid'].view(1)
 		ids = ids.to(self.device)
 		with torch.no_grad():
-			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and cons
+			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and maps
 			for key in imgs.keys():
 				filename = 'recon_{}.nii'.format(key)
 				filepath = os.path.join(save_dir, filename)

@@ -1,6 +1,10 @@
 """
 Script defining fMRIDataset Class and loaders to be used
-November 2019
+Modf March 2020
+-- Added convolved task var and motion vars
+
+ToDos
+Add proper train/test split and better random shuffling here 
 """
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -19,21 +23,38 @@ class FMRIDataset(Dataset):
     def __getitem__(self, idx):
         """Returns a single sample from dset
            Each sample is a dict w/ following keys:
-           subjid: unique id for each subj. These repeat across vols for same subj.
+           subjid: unique index for each subj. These repeat across vols for same subj.
+           subj: actual string defining a subj identifier
            age: age for each subject.
            sex: sex for each subject in bin form. Female are coded as 1, males as 0
            volume: np array containing one volume from a given subj
-           one_not: a one_hot vector identifying each subj
+           task: real-valued task  -- after HRF convolved
+           task_bin: binary task var (needed for other things)
+           x_mot, y_mot, z_mot: translation in x, y, z axis respectively
+           pitch, roll, yaw: rotation across 3 axis (same as canonical defs for fMRI)
         """
+        #get subjid and its index
         unique_subjs = self.df.subjid.unique().tolist()
         subjid = self.df.iloc[idx,1]
         subj_idx = unique_subjs.index(subjid)
+        #get all other covariates
+        #vol # and nii path
+        vol_num = self.df.iloc[idx,2]
+        nii = self.df.iloc[idx,3]
+        #age, sex
         age = self.df.iloc[idx,4]
         sex = self.df.iloc[idx,5]
+        #convolved and bin task_bin
         task = self.df.iloc[idx,6]
         task_bin = self.df.iloc[idx,7]
-        nii = self.df.iloc[idx,3]
-        vol_num = self.df.iloc[idx,2]
+        #motion params
+        x_mot = self.df.iloc[idx,8]
+        y_mot = self.df.iloc[idx,9]
+        z_mot = self.df.iloc[idx,10]
+        pitch_mot = self.df.iloc[idx,11]
+        roll_mot = self.df.iloc[idx,12]
+        yaw_mot = self.df.iloc[idx,13]
+
         fmri = np.array(nib.load(nii).dataobj)
         max = 3284.5 # min is zero! This simplifies norm calc -- becomes x/xmax
         #max = 65536 # used on old dset...
@@ -41,26 +62,28 @@ class FMRIDataset(Dataset):
         flat_vol = volume.flatten()
         norm_vol = np.true_divide(flat_vol, max).reshape(41,49,35)
         sample = {'subjid': subj_idx, 'volume': norm_vol,
-                      'age': age, 'sex': sex, 'task':task, 
-                      'subj': subjid, 'task_bin':task_bin}
+                      'age': age, 'sex': sex, 'task':task,
+                      'subj': subjid, 'task_bin':task_bin, 'x':x_mot,
+                      'y':y_mot, 'z':z_mot, 'pitch':pitch_mot, 'roll':roll_mot,
+                      'yaw':yaw_mot}
         if self.transform:
             sample = self.transform(sample)
 
         return(sample)
 
 class ToTensor(object):
-    "Concatenates input array and converts sample arrays to tensors"
+    "Converts sample arrays to tensors"
 
     def __call__(self, sample):
-        subjid, volume, task = sample['subjid'], sample['volume'], sample['task']
-        #Took age & sex covars out
-        #concat = np.append(age, sex)
-        #concat = np.append (concat, task)
-        return{'covariates':torch.tensor(task, dtype=torch.float),
+        subjid, volume = sample['subjid'], sample['volume']
+        #Concat task w/ mot params by row
+        covars = np.array([sample['task'], sample['x'], sample['y'], sample['z'], \
+        sample['pitch'], sample['roll'], sample['yaw']], dtype=np.float64)
+        return{'covariates':torch.from_numpy(covars).float(),
                 'volume': torch.from_numpy(volume).float(),
                 'subjid': torch.tensor(subjid, dtype=torch.int64)}
 
-def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file='/home/dfd4/fmri_vae/resampled/preproc_dset.csv'):
+def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file=''):
     #Set num workers to zero to avoid runtime error msg.
     #This might need further looking into when we use larger dsets.
     #Setup the train loaders.

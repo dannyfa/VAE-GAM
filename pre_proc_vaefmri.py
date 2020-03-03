@@ -3,6 +3,14 @@ Script for pre-processing data into useful samples for VAE-reg model
 Writes output dset to csv file.
 This file should be given as arg to FMRIDataset class.
 Jan 2020
+
+Added:
+HRF convolution piece -- makes task real-valued
+Binary task catefory is still stored under task_bin var
+
+Motion params -- x, y, z, pitch, yaw and roll
+These are per vol and per subj
+Original SPM files need to be resaved b/c scipy does not deal well with MatLab struct
 """
 #get dependencies
 import os, sys
@@ -15,6 +23,8 @@ import argparse
 from sklearn import preprocessing # for norm step
 import scipy.stats
 from scipy.stats import gamma # for HRF funct
+import scipy
+from scipy import io # for loading motion mats
 
 parser = argparse.ArgumentParser(description='user args for fMRIvae preproc')
 
@@ -46,7 +56,7 @@ else:
 
 #get subjIDs
 #excluded sub-A00058952 due to high voxel intensity vals
-#might re-eval using it if looks ok after new preprocessing...
+#this subj had loads of movement!!! So will keep it out.
 RE = re.compile('\Asub-A000*') #regex for finding subjIDs
 dirs = os.listdir(args.data_dir)
 subjs = []
@@ -132,8 +142,11 @@ for i in raw_df['subjs']:
     subjid = i
     age = raw_df.loc[raw_df['subjs'] == i, 'age'].iloc[0]
     sex = raw_df.loc[raw_df['subjs'] == i, 'sex'].iloc[0]
+    #get motion params ...
+    mot_file_path = os.path.join(args.data_dir, 'motion_mats', '{}_motion_resaved.mat'.format(i))
+    mot_file = scipy.io.loadmat(mot_file_path)
+    #now get fmri dset
     raw_nii = raw_df.loc[raw_df['subjs'] == i, 'nii_files'].iloc[0]
-    # load fmri dset
     fmri = np.array(nib.load(raw_nii).dataobj)
     #Get vol stimulus response vals to convolve w/ HRF
     vols = fmri.shape[3]
@@ -146,8 +159,11 @@ for i in raw_df['subjs']:
     convolved = convolved[:-n_to_remove]
     #build samples
     for vol in range(vols):
-        sample = (subjid, vol, raw_nii, age, sex, convolved[vol], neural[vol])
+        sample = (subjid, vol, raw_nii, age, sex, convolved[vol], neural[vol], mot_file['x'][vol].item(), \
+        mot_file['y'][vol].item(), mot_file['z'][vol].item(), mot_file['pitch'][vol].item(), mot_file['roll'][vol].item(), \
+        mot_file['yaw'][vol].item())
         samples.append(sample)
-new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", "task_bin"])
+new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", \
+"task_bin", "x", "y", "z", "pitch", "roll", "yaw"])
 save_path = os.path.join(args.save_dir, 'preproc_dset.csv')
 new_df.to_csv(save_path)
