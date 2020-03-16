@@ -4,7 +4,7 @@ Modf March 2020
 -- Added convolved task var and motion vars
 
 ToDos
-Add proper train/test split and better random shuffling here 
+Add proper train/test split and better random shuffling here
 """
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -30,8 +30,8 @@ class FMRIDataset(Dataset):
            volume: np array containing one volume from a given subj
            task: real-valued task  -- after HRF convolved
            task_bin: binary task var (needed for other things)
-           x_mot, y_mot, z_mot: translation in x, y, z axis respectively
-           pitch, roll, yaw: rotation across 3 axis (same as canonical defs for fMRI)
+           trans_x, trans_y, trans_z: translation in x, y, z axis respectively
+           rot_x, rot_y, rot_z: rotation across 3 axis (same as canonical defs for fMRI)
         """
         #get subjid and its index
         unique_subjs = self.df.subjid.unique().tolist()
@@ -48,12 +48,12 @@ class FMRIDataset(Dataset):
         task = self.df.iloc[idx,6]
         task_bin = self.df.iloc[idx,7]
         #motion params
-        x_mot = self.df.iloc[idx,8]
-        y_mot = self.df.iloc[idx,9]
-        z_mot = self.df.iloc[idx,10]
-        pitch_mot = self.df.iloc[idx,11]
-        roll_mot = self.df.iloc[idx,12]
-        yaw_mot = self.df.iloc[idx,13]
+        trans_x = self.df.iloc[idx,8]
+        trans_y = self.df.iloc[idx,9]
+        trans_z = self.df.iloc[idx,10]
+        rot_x = self.df.iloc[idx,11]
+        rot_y = self.df.iloc[idx,12]
+        rot_z = self.df.iloc[idx,13]
 
         fmri = np.array(nib.load(nii).dataobj)
         max = 3284.5 # min is zero! This simplifies norm calc -- becomes x/xmax
@@ -63,9 +63,9 @@ class FMRIDataset(Dataset):
         norm_vol = np.true_divide(flat_vol, max).reshape(41,49,35)
         sample = {'subjid': subj_idx, 'volume': norm_vol,
                       'age': age, 'sex': sex, 'task':task,
-                      'subj': subjid, 'task_bin':task_bin, 'x':x_mot,
-                      'y':y_mot, 'z':z_mot, 'pitch':pitch_mot, 'roll':roll_mot,
-                      'yaw':yaw_mot}
+                      'subj': subjid, 'task_bin':task_bin, 'trans_x':trans_x,
+                      'trans_y':trans_y, 'trans_z':trans_z, 'rot_x':rot_x, 'rot_y':rot_y,
+                      'rot_z':rot_z}
         if self.transform:
             sample = self.transform(sample)
 
@@ -77,8 +77,8 @@ class ToTensor(object):
     def __call__(self, sample):
         subjid, volume = sample['subjid'], sample['volume']
         #Concat task w/ mot params by row
-        covars = np.array([sample['task'], sample['x'], sample['y'], sample['z'], \
-        sample['pitch'], sample['roll'], sample['yaw']], dtype=np.float64)
+        covars = np.array([sample['task'], sample['trans_x'], sample['trans_y'], sample['trans_z'], \
+        sample['rot_x'], sample['rot_y'], sample['rot_z']], dtype=np.float64)
         return{'covariates':torch.from_numpy(covars).float(),
                 'volume': torch.from_numpy(volume).float(),
                 'subjid': torch.tensor(subjid, dtype=torch.int64)}

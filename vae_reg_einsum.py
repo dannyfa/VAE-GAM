@@ -23,7 +23,7 @@ from torch.optim import Adam
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
-from torch.distributions import LowRankMultivariateNormal
+from torch.distributions import LowRankMultivariateNormal, Normal, kl
 import umap
 import os
 import itertools
@@ -51,6 +51,12 @@ class VAE(nn.Module):
 		# -log(10) term accounts for removing model_precision term from original
 		epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
 		self.epsilon = torch.nn.Parameter(epsilon)
+		#init z_prior
+		#When init mean, cov_factor and cov_diag .to(self.device) piece is  NEEDED to vals to be  properly passed to CUDA
+		mean = torch.zeros(self.num_latents).to(self.device)
+		cov_factor = torch.zeros(self.num_latents).unsqueeze(-1).to(self.device)
+		cov_diag = torch.ones(self.num_latents).to(self.device)
+		self.z_prior = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
 		self._build_network()
 		self.optimizer = Adam(self.parameters(), lr=self.lr)
 		self.epoch = 0
@@ -58,15 +64,17 @@ class VAE(nn.Module):
 		self.to(self.device)
 
 	def _build_network(self):
+		#added track_running_stats = False flag to batch_norm _get_layers
+		#this improves behavior during test loss calc
 		# Encoder
 		self.conv1 = nn.Conv3d(1,self.nf,3,1)
 		self.conv2 = nn.Conv3d(self.nf,self.nf,3,2)
 		self.conv3 = nn.Conv3d(self.nf,2*self.nf,3,1)
 		self.conv4 = nn.Conv3d(2*self.nf,2*self.nf,3,2)
 		self.conv5 = nn.Conv3d(2*self.nf,2*self.nf,3,1)
-		self.bn1 = nn.BatchNorm3d(1)
-		self.bn3 = nn.BatchNorm3d(self.nf)
-		self.bn5 = nn.BatchNorm3d(2*self.nf)
+		self.bn1 = nn.BatchNorm3d(1, track_running_stats=False)
+		self.bn3 = nn.BatchNorm3d(self.nf, track_running_stats=False)
+		self.bn5 = nn.BatchNorm3d(2*self.nf, track_running_stats=False)
 		self.fc1 = nn.Linear(2*self.nf*6*8*4, 200)
 		self.fc2 = nn.Linear(200, 100)
 		self.fc31 = nn.Linear(100, 50)
@@ -86,9 +94,9 @@ class VAE(nn.Module):
 		self.convt3 = nn.ConvTranspose3d(2*self.nf,self.nf,3,1)
 		self.convt4 = nn.ConvTranspose3d(self.nf,self.nf,(5,3,3),2)
 		self.convt5 = nn.ConvTranspose3d(self.nf,1,3,1)
-		self.bnt1 = nn.BatchNorm3d(2*self.nf)
-		self.bnt3 = nn.BatchNorm3d(2*self.nf)
-		self.bnt5 = nn.BatchNorm3d(self.nf)
+		self.bnt1 = nn.BatchNorm3d(2*self.nf, track_running_stats=False)
+		self.bnt3 = nn.BatchNorm3d(2*self.nf, track_running_stats=False)
+		self.bnt5 = nn.BatchNorm3d(self.nf, track_running_stats=False)
 
 	def _get_layers(self):
 		"""Return a dictionary mapping names to network layers.
@@ -160,17 +168,35 @@ class VAE(nn.Module):
 			keys = list(imgs.keys())
 			imgs[keys[i]] = cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
-		#calculating loss
-		elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
-		np.log(2*np.pi)) # B * p(z)
-		x_diff = x.view(x.shape[0], -1) - x_rec
-		x_diff = torch.einsum('bi,i->bi', x_diff.view(x.shape[0],-1), torch.exp(-self.epsilon.view(-1).float()))
-		elbo = elbo + -0.5 * (torch.sum(torch.pow(x_diff, 2)) + IMG_DIM * \
-		np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
-		elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
+		# calculating loss
+		#new_version, using torch.distributions modules
+		elbo = -kl.kl_divergence(latent_dist, self.z_prior) #shape = batch_dim
+		#below is long, make it cleaner...
+		#obs_dist.shape = batch_dim, img_dim
+		obs_dist = Normal(x_rec.float(), torch.exp(-self.epsilon.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)).float())
+		log_prob = obs_dist.log_prob(x.view(ids.shape[0], -1))
+		#sum over img_dim to get a batch_dim tensor
+		sum_log_prob = torch.sum(log_prob, dim=1)
+		elbo = elbo + sum_log_prob
+		#contract all values using torch.mean()
+		elbo = torch.mean(elbo, dim=0)
 		if return_latent_rec:
 			return -elbo, z.detach().cpu().numpy(), imgs
 		return -elbo
+
+		#original hard-coded version
+		#leaving here for now while we test the above
+		# this  is missing a log-term for vars epsilon...
+		#elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
+		#np.log(2*np.pi)) # B * p(z)
+		#x_diff = x.view(x.shape[0], -1) - x_rec
+		#x_diff = torch.einsum('bi,i->bi', x_diff.view(x.shape[0],-1), torch.exp(-self.epsilon.view(-1).float()))
+		#elbo = elbo + -0.5 * (torch.sum(torch.pow(x_diff, 2)) + IMG_DIM * \
+		#np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
+		#elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
+		#if return_latent_rec:
+		#	return -elbo, z.detach().cpu().numpy(), imgs
+		#return -elbo
 
 	def train_epoch(self, train_loader):
 		self.train()

@@ -6,11 +6,18 @@ Jan 2020
 
 Added:
 HRF convolution piece -- makes task real-valued
-Binary task catefory is still stored under task_bin var
+Binary task category is still stored under task_bin var
 
 Motion params -- x, y, z, pitch, yaw and roll
 These are per vol and per subj
-Original SPM files need to be resaved b/c scipy does not deal well with MatLab struct
+If using original SPM files:
+    these need to be resaved b/c scipy does not deal well with MatLab struct
+If coming from fmriprep:
+    just read tsv -- this is current version shown here
+
+ToDos
+- Get rid of fluf once we decide which covars actually matter
+- Put HRF and StimtoNeuro defs at end 
 """
 #get dependencies
 import os, sys
@@ -68,13 +75,17 @@ for i in range(len(dirs)):
             subjs.append(dirs[i])
 #print(len(subjs))
 
-#get paths to pre-processed nii files
+#get paths to pre-processed nii files and to tsv mot files
 raw_data_files = []
+raw_reg_files = []
 for i in range(len(subjs)):
     full_path = os.path.join(args.data_dir, subjs[i])
-    for data_file in Path(full_path).rglob('wrsub-A000*CHECKERBOARD_acq-1400_bold.nii'):
+    for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled.nii.gz'):
         raw_data_files.append(str(data_file))
-#print(len(raw_data_files))
+    for reg_file in Path(full_path).rglob('sub-A000*_ses-NFB2_task-CHECKERBOARD_acq-1400_desc-confounds_regressors.tsv'):
+        raw_reg_files.append(str(reg_file))
+print(len(raw_data_files))
+print(len(raw_reg_files))
 
 #getting age and gender for subjs in data_dir
 demos_file = os.path.join(args.data_dir,'participants.tsv') #also hardcoded for now
@@ -98,7 +109,7 @@ normalized_age = preprocessing.normalize([age_array]).tolist()[0]
 #print(len(normalized_age))
 
 #creating raw_df
-raw_df = {'nii_files': raw_data_files, 'subjs': subjs, 'age': normalized_age, 'sex': sex_bin}
+raw_df = {'nii_files': raw_data_files, 'subjs': subjs, 'age': normalized_age, 'sex': sex_bin, 'regressors': raw_reg_files}
 raw_df = pd.DataFrame(raw_df)
 
 #def HRF funct.
@@ -143,8 +154,14 @@ for i in raw_df['subjs']:
     age = raw_df.loc[raw_df['subjs'] == i, 'age'].iloc[0]
     sex = raw_df.loc[raw_df['subjs'] == i, 'sex'].iloc[0]
     #get motion params ...
-    mot_file_path = os.path.join(args.data_dir, 'motion_mats', '{}_motion_resaved.mat'.format(i))
-    mot_file = scipy.io.loadmat(mot_file_path)
+    #if using SPM files ...
+    #mot_file_path = os.path.join(args.data_dir, 'motion_mats', '{}_motion_resaved.mat'.format(i))
+    #mot_file = scipy.io.loadmat(mot_file_path)
+    #if using fmriprep files
+    raw_reg = raw_df.loc[raw_df['subjs'] == i, 'regressors'].iloc[0]
+    regressors = pd.read_csv(raw_reg, sep='\t', index_col=False) # unsure if idx col flag is needed here
+    trans_x, trans_y, trans_z = regressors['trans_x'], regressors['trans_y'], regressors['trans_z']
+    rot_x, rot_y, rot_z = regressors['rot_x'], regressors['rot_y'], regressors['rot_z']
     #now get fmri dset
     raw_nii = raw_df.loc[raw_df['subjs'] == i, 'nii_files'].iloc[0]
     fmri = np.array(nib.load(raw_nii).dataobj)
@@ -159,11 +176,15 @@ for i in raw_df['subjs']:
     convolved = convolved[:-n_to_remove]
     #build samples
     for vol in range(vols):
-        sample = (subjid, vol, raw_nii, age, sex, convolved[vol], neural[vol], mot_file['x'][vol].item(), \
-        mot_file['y'][vol].item(), mot_file['z'][vol].item(), mot_file['pitch'][vol].item(), mot_file['roll'][vol].item(), \
-        mot_file['yaw'][vol].item())
+        #SPM file version ...
+        #sample = (subjid, vol, raw_nii, age, sex, convolved[vol], neural[vol], mot_file['x'][vol].item(), \
+        #mot_file['y'][vol].item(), mot_file['z'][vol].item(), mot_file['pitch'][vol].item(), mot_file['roll'][vol].item(), \
+        #mot_file['yaw'][vol].item())
+        sample = (subjid, vol, raw_nii, age, sex, convolved[vol], neural[vol], trans_x[vol], \
+        trans_y[vol], trans_z[vol], rot_x[vol], rot_y[vol], \
+        rot_z[vol])
         samples.append(sample)
 new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", \
-"task_bin", "x", "y", "z", "pitch", "roll", "yaw"])
+"task_bin", "x", "y", "z", "rot_x", "rot_y", "rot_z"])
 save_path = os.path.join(args.save_dir, 'preproc_dset.csv')
 new_df.to_csv(save_path)
