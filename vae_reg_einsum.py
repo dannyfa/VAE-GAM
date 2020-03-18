@@ -5,7 +5,10 @@ Added motion params in 6 degrees of freedom as regressors of no interest
 This should help clean up contrast maps.
 
 March 2020
-ToDos (once we have dencent cons maps)
+ToDos
+- Try better initilization w/ SPM beta-map ***
+- Try regressing out CSF vars as well ***
+(once we have dencent cons maps):
 - Make it more readable
 - Improve documentation
 - Implement new save and load state methods
@@ -33,7 +36,7 @@ IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data on pr
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto"):
+	def __init__(self, nf=8, save_dir='', lr=1e-4, num_covariates=7, num_latents=32, device_name="auto"):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
