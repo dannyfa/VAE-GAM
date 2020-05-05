@@ -2,17 +2,15 @@
 Z-based fMRIVAE regression model w/ covariate task as a real variable (i.e, boxcar * HRF)
 Added single voxel noise modeling as well using epsilon param
 Added motion params in 6 degrees of freedom as regressors of no interest
-This should help clean up contrast maps.
 
-March 2020
-ToDos
-- Try better initilization w/ SPM beta-map ***
-- Try regressing out CSF vars as well ***
-(once we have dencent cons maps):
-- Make it more readable
+To Do's
+- improve on initialization
+- add orthogonal signal control
+- add GP regression
 - Improve documentation
 - Implement new save and load state methods
 - Add time dependent latent space var plotting
+
 """
 
 import matplotlib.pyplot as plt
@@ -27,16 +25,22 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
 from torch.distributions import LowRankMultivariateNormal, Normal, kl
+#uncomment if needing to chase-down a nan in loss
+#from torch import autograd
 import umap
 import os
 import itertools
 from sklearn.decomposition import PCA
 
-IMG_SHAPE = (41,49,35) # maintained shape of original by downsampling data on preprocessing
+# maintained shape of original by downsampling data on preprocessing
+IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
+# added init w/ beta map avg
+# beta map was re-scaled to represent at most 11% of total explained variance
+
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-4, num_covariates=7, num_latents=32, device_name="auto"):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = ''):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
@@ -50,12 +54,27 @@ class VAE(nn.Module):
 			self.device = torch.device(device_name)
 		if self.save_dir != '' and not os.path.exists(self.save_dir):
 			os.makedirs(self.save_dir)
-		#init epsilon param for masking
-		# -log(10) term accounts for removing model_precision term from original
+		# init epsilon param modeling single voxel variance
+		# -log(10) init. accounts for removing model_precision term from original version
 		epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
 		self.epsilon = torch.nn.Parameter(epsilon)
-		#init z_prior
-		#When init mean, cov_factor and cov_diag .to(self.device) piece is  NEEDED to vals to be  properly passed to CUDA
+		# init. task cons as a nn param
+		# am using avg of  task effect map from SPM as init here...
+		# removed flatten() since no longer needed
+		beta_init = np.array(nib.load(task_init).dataobj)
+		# uncomment below if running simple norm + scaling
+		#init_mean = np.mean(beta_init)
+		#init_std = np.std(beta_init)
+		#init_max_sig = np.amax(beta_init)
+		#eps = 1e-11
+		#init_norm = (beta_init-init_mean)/(init_std+eps)
+		#init_norm_scld = init_norm/init_max_sig
+		#re-shape it prior to passing
+		#init_norm_slcd = init_norm_scld.reshape(IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2])
+		#pass it to init param
+		self.task_init = torch.nn.Parameter(torch.FloatTensor(beta_init).to(self.device))
+		# init z_prior
+		# When init mean, cov_factor and cov_diag '.to(self.device)' piece is  NEEDED for vals to be  properly passed to CUDA...
 		mean = torch.zeros(self.num_latents).to(self.device)
 		cov_factor = torch.zeros(self.num_latents).unsqueeze(-1).to(self.device)
 		cov_diag = torch.ones(self.num_latents).to(self.device)
@@ -67,8 +86,8 @@ class VAE(nn.Module):
 		self.to(self.device)
 
 	def _build_network(self):
-		#added track_running_stats = False flag to batch_norm _get_layers
-		#this improves behavior during test loss calc
+		# added track_running_stats = False flag to batch_norm _get_layers
+		# this improves behavior during test loss calc
 		# Encoder
 		self.conv1 = nn.Conv3d(1,self.nf,3,1)
 		self.conv2 = nn.Conv3d(self.nf,self.nf,3,2)
@@ -150,33 +169,51 @@ class VAE(nn.Module):
 	def forward(self, ids, covariates, x, return_latent_rec=False):
 		imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
 		'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
+		keys = list(imgs.keys())
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
+		#add small # to diag matrix
+		#this should improve numerical instability causing nan
+		d = d.add(1e-6)
+		#check if d is not too small
+		#for rn am forcing this to show only if d<1e-6...
+		#this is unlikely given addition above
+		d_small = d[d<1e-6]
+		if len(d_small)>= 1:
+			print('Diagonal term seems too small... This can cause instabilities!')
+			print(len(d_small))
 		latent_dist = LowRankMultivariateNormal(mu, u, d)
 		z = latent_dist.rsample()
-		base_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
+		base_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0],\
+		dtype=torch.int64), self.num_covariates+1)
 		base_oh = base_oh.to(self.device).float()
 		zcat = torch.cat([z, base_oh], 1).float()
 		x_rec = self.decode(zcat).view(x.shape[0], -1)
 		imgs['base'] = x_rec.detach().cpu().numpy()
-		#new_cov = covariates.unsqueeze(-1) #if covar is singleton, use to add batch_dim
+		#if covar is singleton, use line below to add batch_dim
+		#new_cov = covariates.unsqueeze(-1)
 		for i in range(1,self.num_covariates+1):
-			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0], dtype=torch.int64), self.num_covariates+1)
+			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
+			dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
 			diff = self.decode(zcat).view(x.shape[0], -1)
-			cons = torch.einsum('b,bx->bx', covariates[:, i-1], diff) # using EinSum to preserve batch dim
+			# using EinSum to preserve batch dim
+			cons = torch.einsum('b,bx->bx', covariates[:, i-1], diff)
+			#add cons to init_task param if covariate == 'task'
+			#summation order was adopted to avoid in place ops that would cause autograd errors
+			#unsure if this is MOST correct way of adding a costum init..
+			if i==1:
+				cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
 			x_rec = x_rec + cons
-			#now get maps
-			keys = list(imgs.keys())
 			imgs[keys[i]] = cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
 		# calculating loss
-		#new_version, using torch.distributions modules
+		# New version using torch.distributions modules only
 		elbo = -kl.kl_divergence(latent_dist, self.z_prior) #shape = batch_dim
-		#below is long, make it cleaner...
 		#obs_dist.shape = batch_dim, img_dim
-		obs_dist = Normal(x_rec.float(), torch.exp(-self.epsilon.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)).float())
+		obs_dist = Normal(x_rec.float(),\
+		torch.exp(-self.epsilon.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)).float())
 		log_prob = obs_dist.log_prob(x.view(ids.shape[0], -1))
 		#sum over img_dim to get a batch_dim tensor
 		sum_log_prob = torch.sum(log_prob, dim=1)
@@ -187,9 +224,9 @@ class VAE(nn.Module):
 			return -elbo, z.detach().cpu().numpy(), imgs
 		return -elbo
 
-		#original hard-coded version
-		#leaving here for now while we test the above
-		# this  is missing a log-term for vars epsilon...
+		# Original hard-coded version (from Jack)
+		# This  is missing a log-term for the variable epsilon...
+
 		#elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
 		#np.log(2*np.pi)) # B * p(z)
 		#x_diff = x.view(x.shape[0], -1) - x_rec
@@ -201,9 +238,14 @@ class VAE(nn.Module):
 		#	return -elbo, z.detach().cpu().numpy(), imgs
 		#return -elbo
 
+    #added autograd.detect.anomaly() to trace out nan loss issue
+	#this should only have mode flag = True  for debugging
+	#otherwise, it will significantly slow code execution!
+
 	def train_epoch(self, train_loader):
 		self.train()
 		train_loss = 0.0
+		#with autograd.detect_anomaly():
 		for batch_idx, sample in enumerate(train_loader):
 			#Inputs now come from dataloader dicts
 			x = sample['volume']
@@ -239,8 +281,6 @@ class VAE(nn.Module):
 		print('Test loss: {:.4f}'.format(test_loss))
 		return test_loss
 
-#Check out newer save and load methods Jack mentioned
-#these will likely be useful here
 	def save_state(self, filename):
 		layers = self._get_layers()
 		state = {}
@@ -253,6 +293,7 @@ class VAE(nn.Module):
 		state['lr'] = self.lr
 		state['save_dir'] = self.save_dir
 		state['epsilon'] = self.epsilon
+		state['task_init'] = self.task_init
 		filename = os.path.join(self.save_dir, filename)
 		torch.save(state, filename)
 
@@ -267,10 +308,12 @@ class VAE(nn.Module):
 		self.loss = checkpoint['loss']
 		self.epoch = checkpoint['epoch']
 		self.epsilon = checkpoint['epsilon']
+		self.task_init = checkpoint['task_init']
 
 	def project_latent(self, loaders_dict, save_dir, title=None, split=98):
-		# plotting only test set since this is un-shuffled. Will plot by subjid in future to overcome this limitation
-		#Collect latent means.
+		# plotting only test set since this is un-shuffled.
+		# Will plot by subjid in future to overcome this limitation
+		# Collect latent means.
 		filename = 'temp.pdf'
 		file_path = os.path.join(save_dir, filename)
 		latent = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
@@ -288,13 +331,15 @@ class VAE(nn.Module):
 		projection = transform.fit_transform(latent)
 		#print(projection.shape)
 		# Plot.
-		c_list = ['b','g','r','c','m','y','k','orange','blueviolet','hotpink','lime','skyblue','teal','sienna']
+		c_list = ['b','g','r','c','m','y','k','orange','blueviolet','hotpink',\
+		'lime','skyblue','teal','sienna']
 		colors = itertools.cycle(c_list)
 		data_chunks = range(0,len(loaders_dict['test'].dataset),split)  #check value of split here
 		#print(data_chunks)
 		for i in data_chunks:
 			t = np.arange(split)
-			plt.scatter(projection[i:i+split,0], projection[i:i+split,1], color=next(colors), s=1.0, alpha=0.6)
+			plt.scatter(projection[i:i+split,0], projection[i:i+split,1], \
+			color=next(colors), s=1.0, alpha=0.6)
 			#commenting plot by time
 			#plt.scatter(projection[i:i+split,0], projection[i:i+split,1], c=t, s=1.0, alpha=0.6)
 			plt.axis('off')
@@ -306,25 +351,26 @@ class VAE(nn.Module):
 
     # Adding new method to compute PCA for latent means.
 	# This can be done per epoch or after some training
-	def compute_PCA(self, loaders_dict, save_dir):
-		csv_file = 'PCA_2n.csv'
-		csv_path = os.path.join(save_dir, csv_file)
-		latents = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
-		with torch.no_grad():
-			j = 0
-			for i, sample in enumerate(loaders_dict['test']):
-				x = sample['volume']
-				x = x.to(self.device)
-				mu, _, _ = self.encode(x)
-				latents[j:j+len(mu)] = mu.detach().cpu().numpy()
-				j += len(mu)
-		print("="*40)
-		print('Computing latent means PCA')
+	#cmt since no longer needed
+	#def compute_PCA(self, loaders_dict, save_dir):
+	#	csv_file = 'PCA_2n.csv'
+	#	csv_path = os.path.join(save_dir, csv_file)
+	#	latents = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
+	#	with torch.no_grad():
+	#		j = 0
+	#		for i, sample in enumerate(loaders_dict['test']):
+	#			x = sample['volume']
+	#			x = x.to(self.device)
+	#			mu, _, _ = self.encode(x)
+	#			latents[j:j+len(mu)] = mu.detach().cpu().numpy()
+	#			j += len(mu)
+	#	print("="*40)
+	#	print('Computing latent means PCA')
 		# not setting number of components... This should keep all PCs. Max is 32 here
-		pca = PCA()
-		components = pca.fit_transform(latents)
-		print("Number of components: {}".format(pca.n_components_))
-		print("Explained variance: {}".format(pca.explained_variance_))
+	#	pca = PCA()
+	#	components = pca.fit_transform(latents)
+	#	print("Number of components: {}".format(pca.n_components_))
+	#	print("Explained variance: {}".format(pca.explained_variance_))
 
 	def reconstruct(self, item, ref_nii, save_dir):
 		"""Reconstruct a volume and its cons given a dset idx."""
@@ -335,7 +381,7 @@ class VAE(nn.Module):
 		ids = item['subjid'].view(1)
 		ids = ids.to(self.device)
 		with torch.no_grad():
-			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True) #mk fwrd return base and maps
+			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True)
 			for key in imgs.keys():
 				filename = 'recon_{}.nii'.format(key)
 				filepath = os.path.join(save_dir, filename)
@@ -358,8 +404,8 @@ class VAE(nn.Module):
 			#Run through the training data and record a loss.
 			loss = self.train_epoch(loaders['train'])
 			self.loss['train'][epoch] = loss
-			#Uncomment if adding  PCA calc for each training epoch.
-			#self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
+			# Uncomment if adding  PCA calc for each training epoch.
+			# self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
 			# Run through the test data and record a loss.
 			if (test_freq is not None) and (epoch % test_freq == 0):
 				loss = self.test_epoch(loaders['test'])

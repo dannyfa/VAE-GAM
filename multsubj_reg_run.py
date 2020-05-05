@@ -1,6 +1,6 @@
 """
 Wrapper to call in data class, loaders and vae_reg model
-December 2019
+
 """
 import os, sys
 import argparse
@@ -23,7 +23,7 @@ help='Full path to reference nii file to be used for reconstructions.') # did no
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', \
 help='Input batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',\
-help='Number of epochs to train (default: 100)')
+help='Number of epochs to train (default: 10)')
 parser.add_argument('--seed', type=int, default=1, metavar='S', \
 help='Random seed (default: 1)')
 parser.add_argument('--save_freq', type=int, default=10, metavar='N', \
@@ -32,6 +32,9 @@ parser.add_argument('--test_freq', type=int, default=2, metavar='N', \
 help='How many batches to wait before testing')
 parser.add_argument('--split', type=int, metavar='N', default=98, \
 help='split # for project latent method. This is # of frames in each dset.')
+#adding beta task map init arg
+parser.add_argument('--task_init', type=str, metavar='N', default='', \
+help='Path to beta map used to init task contrast in model.')
 
 args = parser.parse_args()
 torch.manual_seed(args.seed)
@@ -47,11 +50,11 @@ else:
 if __name__ == "__main__":
 	main_start = time.time()
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
-	model = vae_reg.VAE()
+	model = vae_reg.VAE(task_init = args.task_init)
 	#uncomment if starting from pre-trained model state
 	#model.load_state(filename ='/home/dfd4/fmri_vae/resampled/vaereg_NormRegNoPCA/checkpoint_012.tar')
 	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
-	model.project_latent(loaders_dict, title = "New version test", split=args.split, save_dir=args.save_dir)
+	model.project_latent(loaders_dict, title = "Latent space plot", split=args.split, save_dir=args.save_dir)
 	#Uncomment if wanting to do PCA computation after training only (vs. per epoch)
 	#model.compute_PCA(loaders_dict, save_dir=args.save_dir)
 	data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
