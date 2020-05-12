@@ -1,6 +1,9 @@
 """
 Wrapper to call in data class, loaders and vae_reg model
 
+To DO's
+- clean up: PCA method call (not needed likely), end reconstruction lines ... 
+
 """
 import os, sys
 import argparse

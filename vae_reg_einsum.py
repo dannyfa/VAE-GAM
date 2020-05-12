@@ -4,12 +4,11 @@ Added single voxel noise modeling as well using epsilon param
 Added motion params in 6 degrees of freedom as regressors of no interest
 
 To Do's
-- improve on initialization
 - add orthogonal signal control
 - add GP regression
-- Improve documentation
 - Implement new save and load state methods
 - Add time dependent latent space var plotting
+- clean up 
 
 """
 
@@ -59,10 +58,10 @@ class VAE(nn.Module):
 		epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
 		self.epsilon = torch.nn.Parameter(epsilon)
 		# init. task cons as a nn param
-		# am using avg of  task effect map from SPM as init here...
+		# am using variance scld avg of  task effect map from SPM as init here...
 		# removed flatten() since no longer needed
 		beta_init = np.array(nib.load(task_init).dataobj)
-		# uncomment below if running simple norm + scaling
+		# uncomment below if running simple instance norm + scaling
 		#init_mean = np.mean(beta_init)
 		#init_std = np.std(beta_init)
 		#init_max_sig = np.amax(beta_init)
@@ -172,16 +171,11 @@ class VAE(nn.Module):
 		keys = list(imgs.keys())
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
-		#add small # to diag matrix
-		#this should improve numerical instability causing nan
-		d = d.add(1e-6)
 		#check if d is not too small
-		#for rn am forcing this to show only if d<1e-6...
-		#this is unlikely given addition above
+		#if d is too small, add a small # before using it
 		d_small = d[d<1e-6]
 		if len(d_small)>= 1:
-			print('Diagonal term seems too small... This can cause instabilities!')
-			print(len(d_small))
+			d = d.add(1e-6)
 		latent_dist = LowRankMultivariateNormal(mu, u, d)
 		z = latent_dist.rsample()
 		base_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0],\
@@ -201,8 +195,8 @@ class VAE(nn.Module):
 			# using EinSum to preserve batch dim
 			cons = torch.einsum('b,bx->bx', covariates[:, i-1], diff)
 			#add cons to init_task param if covariate == 'task'
-			#summation order was adopted to avoid in place ops that would cause autograd errors
-			#unsure if this is MOST correct way of adding a costum init..
+			#implementation below was adopted to avoid in place ops that would cause autograd errors
+			#unsure if this is MOST correct way of adding a costum initialization
 			if i==1:
 				cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
 			x_rec = x_rec + cons
@@ -225,7 +219,7 @@ class VAE(nn.Module):
 		return -elbo
 
 		# Original hard-coded version (from Jack)
-		# This  is missing a log-term for the variable epsilon...
+		# This  is missing a log term for the nn variable epsilon...
 
 		#elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
 		#np.log(2*np.pi)) # B * p(z)
@@ -238,8 +232,8 @@ class VAE(nn.Module):
 		#	return -elbo, z.detach().cpu().numpy(), imgs
 		#return -elbo
 
-    #added autograd.detect.anomaly() to trace out nan loss issue
-	#this should only have mode flag = True  for debugging
+    #commented autograd.detect.anomaly() line  was used to trace out nan loss issue
+	#only use this if trying to trace doing issues with auto-grad
 	#otherwise, it will significantly slow code execution!
 
 	def train_epoch(self, train_loader):
