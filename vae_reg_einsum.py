@@ -4,11 +4,10 @@ Added single voxel noise modeling as well using epsilon param
 Added motion params in 6 degrees of freedom as regressors of no interest
 
 To Do's
-- add orthogonal signal control
 - add GP regression
 - Implement new save and load state methods
 - Add time dependent latent space var plotting
-- clean up 
+- Clean up
 
 """
 
