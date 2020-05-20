@@ -2,7 +2,7 @@
 Wrapper to call in data class, loaders and vae_reg model
 
 To DO's
-- clean up: PCA method call (not needed likely), end reconstruction lines ... 
+- clean up: PCA method call (not needed likely), end reconstruction lines ...
 
 """
 import os, sys
@@ -12,8 +12,8 @@ import random
 import torch
 #from torch.utils.data import Dataset, DataLoader
 import time
-import DataClass as data #w/ FMRIDataClass, trsfm and loaders
-import vae_reg
+import DataClass_GP as data #w/ FMRIDataClass, trsfm and loaders
+import vae_reg_GP as vae_reg
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')
 

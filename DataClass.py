@@ -61,10 +61,11 @@ class FMRIDataset(Dataset):
         volume = fmri[:,:,:,vol_num]
         flat_vol = volume.flatten()
         norm_vol = np.true_divide(flat_vol, max).reshape(41,49,35)
-        sample = {'subjid': subj_idx, 'volume': norm_vol,
-                      'age': age, 'sex': sex, 'task':task,
-                      'subj': subjid, 'task_bin':task_bin, 'trans_x':trans_x,
-                      'trans_y':trans_y, 'trans_z':trans_z, 'rot_x':rot_x, 'rot_y':rot_y,
+        #added vol_num to sample
+        sample = {'subjid': subj_idx, 'volume': norm_vol, 'vol_num':vol_num,
+                      'age': age, 'sex': sex, 'task':task,'subj': subjid,
+                      'task_bin':task_bin, 'trans_x':trans_x, 'trans_y':trans_y,
+                      'trans_z':trans_z, 'rot_x':rot_x, 'rot_y':rot_y,
                       'rot_z':rot_z}
         if self.transform:
             sample = self.transform(sample)
@@ -75,13 +76,15 @@ class ToTensor(object):
     "Converts sample arrays to tensors"
 
     def __call__(self, sample):
-        subjid, volume = sample['subjid'], sample['volume']
+        subjid, volume, vol_num = sample['subjid'], sample['volume'], sample['vol_num']
         #Concat task w/ mot params by row
+        #added vol_num here for GP piece 
         covars = np.array([sample['task'], sample['trans_x'], sample['trans_y'], sample['trans_z'], \
         sample['rot_x'], sample['rot_y'], sample['rot_z']], dtype=np.float64)
         return{'covariates':torch.from_numpy(covars).float(),
                 'volume': torch.from_numpy(volume).float(),
-                'subjid': torch.tensor(subjid, dtype=torch.int64)}
+                'subjid': torch.tensor(subjid, dtype=torch.int64),
+                'vol_num': torch.tensor(vol_num, dtype=torch.float64)}
 
 def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file=''):
     #Set num workers to zero to avoid runtime error msg.

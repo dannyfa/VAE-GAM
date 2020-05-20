@@ -1,14 +1,14 @@
 """
-Z-based fMRIVAE regression model w/ covariate task as a real variable (i.e, boxcar * HRF)
-Added single voxel noise modeling as well using epsilon param
-Added motion params in 6 degrees of freedom as regressors of no interest
+Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
+- Added single voxel noise modeling (epsilon param)
+- Added motion regressors in 6 degrees of freedom (from fmriprep)
+- Added 1D GPs to model regressors (task + 6 motion params)
+- Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
 
-To Do's
-- add GP regression
-- Implement new save and load state methods
-- Add time dependent latent space var plotting
-- Clean up
-
+To Do's (once GPs are functional...)
+- Implement new save and load state methods (will make code less redundant)
+- Clean up, improve documentation
+- Add time dependent latent space plotting (post-NIPs)
 """
 
 import matplotlib.pyplot as plt
@@ -29,13 +29,11 @@ import umap
 import os
 import itertools
 from sklearn.decomposition import PCA
+import gp #module with GP class
 
-# maintained shape of original by downsampling data on preprocessing
+# maintained shape of original nn by downsampling data on preprocessing
 IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
-
-# added init w/ beta map avg
-# beta map was re-scaled to represent at most 11% of total explained variance
 
 class VAE(nn.Module):
 	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = ''):
@@ -57,20 +55,81 @@ class VAE(nn.Module):
 		epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
 		self.epsilon = torch.nn.Parameter(epsilon)
 		# init. task cons as a nn param
-		# am using variance scld avg of  task effect map from SPM as init here...
-		# removed flatten() since no longer needed
+		# am using variance scld avg of task effect map from SPM as init here.
 		beta_init = np.array(nib.load(task_init).dataobj)
-		# uncomment below if running simple instance norm + scaling
-		#init_mean = np.mean(beta_init)
-		#init_std = np.std(beta_init)
-		#init_max_sig = np.amax(beta_init)
-		#eps = 1e-11
-		#init_norm = (beta_init-init_mean)/(init_std+eps)
-		#init_norm_scld = init_norm/init_max_sig
-		#re-shape it prior to passing
-		#init_norm_slcd = init_norm_scld.reshape(IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2])
-		#pass it to init param
 		self.task_init = torch.nn.Parameter(torch.FloatTensor(beta_init).to(self.device))
+		#init params for GPs
+		#these are Xus (not trainable), Yu's, lengthscale and kernel vars (trainable)
+		#pass these to a big dict -- gp_params
+		self.y_var = torch.as_tensor((0.1)).to(self.device)
+		#for now, not scaling GPs mll loss ... Will change if things don't look smooth
+		self.mll_scale = torch.as_tensor((1.0)).to(self.device)
+		self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
+		#for task
+		self.xu_task = torch.linspace(-0.5, 2.5, 30).to(self.device)
+		self.gp_params['task']['xu'] = self.xu_task
+		self.Y_task = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.gp_params['task']['y'] = self.Y_task
+		self.kvar_task = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+		self.gp_params['task']['kvar'] = self.kvar_task
+		self.logls_task = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['task']['log_ls'] = self.logls_task
+		#Now same for 6 motion GPs
+		#x trans
+		self.xu_x = torch.linspace(-0.2, 0.2, 30).to(self.device)
+		self.gp_params['x']['xu'] = self.xu_x
+		self.Y_x = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.gp_params['x']['y'] = self.Y_x
+		self.kvar_x = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+		self.gp_params['x']['kvar'] = self.kvar_x
+		self.logls_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['x']['log_ls'] = self.logls_x
+        #y trans
+		self.xu_y = torch.linspace(-0.4, 0.4, 30).to(self.device)
+		self.gp_params['y']['xu'] = self.xu_y
+		self.Y_y = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.gp_params['y']['y'] = self.Y_y
+		self.kvar_y = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+		self.gp_params['y']['kvar'] = self.kvar_y
+		self.logls_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['y']['log_ls'] = self.logls_y
+		#z trans
+		self.xu_z = torch.linspace(-0.5, 0.5, 30).to(self.device)
+		self.gp_params['z']['xu'] = self.xu_z
+		self.Y_z = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.gp_params['z']['y'] = self.Y_z
+		self.kvar_z = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+		self.gp_params['z']['kvar'] = self.kvar_z
+		self.logls_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['z']['log_ls'] = self.logls_z
+		#rotational ones
+		#xrot
+		self.xu_xrot = torch.linspace(-0.01, 0.01, 30).to(self.device)
+		self.gp_params['xrot']['xu'] = self.xu_xrot
+		self.Y_xrot = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.gp_params['xrot']['y'] = self.Y_xrot
+		self.kvar_xrot= torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+		self.gp_params['xrot']['kvar'] = self.kvar_xrot
+		self.logls_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['xrot']['log_ls'] = self.logls_xrot
+		#yrot
+		self.xu_yrot = torch.linspace(-0.005, 0.005, 30).to(self.device)
+		self.gp_params['yrot']['xu'] = self.xu_yrot
+		self.Y_yrot= torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.gp_params['yrot']['y'] = self.Y_yrot
+		self.kvar_yrot = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+		self.gp_params['yrot']['kvar'] = self.kvar_yrot
+		self.logls_yrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['yrot']['log_ls'] = self.logls_yrot
+		#zrot
+		self.xu_zrot = torch.linspace(-0.005, 0.005, 30).to(self.device)
+		self.gp_params['zrot']['xu'] = self.xu_zrot
+		self.Y_zrot= torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.gp_params['zrot']['y'] = self.Y_zrot
+		self.kvar_zrot= torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+		self.gp_params['zrot']['kvar'] = self.kvar_zrot
+		self.logls_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['zrot']['log_ls'] = self.logls_zrot
 		# init z_prior
 		# When init mean, cov_factor and cov_diag '.to(self.device)' piece is  NEEDED for vals to be  properly passed to CUDA...
 		mean = torch.zeros(self.num_latents).to(self.device)
@@ -164,10 +223,15 @@ class VAE(nn.Module):
 		h = F.relu(self.convt4(h))
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
+
 	def forward(self, ids, covariates, x, return_latent_rec=False):
 		imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
 		'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
-		keys = list(imgs.keys())
+		imgs_keys = list(imgs.keys())
+		gp_params_keys = list(self.gp_params.keys())
+		#set batch GP_loss to zero
+		#computed mlls will be added to it and passed on to overall batch_loss along w/ VAE loss
+		gp_loss = 0
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
 		#check if d is not too small
@@ -183,26 +247,44 @@ class VAE(nn.Module):
 		zcat = torch.cat([z, base_oh], 1).float()
 		x_rec = self.decode(zcat).view(x.shape[0], -1)
 		imgs['base'] = x_rec.detach().cpu().numpy()
-		#if covar is singleton, use line below to add batch_dim
-		#new_cov = covariates.unsqueeze(-1)
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
 			dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
 			diff = self.decode(zcat).view(x.shape[0], -1)
-			# using EinSum to preserve batch dim
-			cons = torch.einsum('b,bx->bx', covariates[:, i-1], diff)
+			#get params for GP regressor
+			Xu = self.gp_params[gp_params_keys[i-1]]['xu']
+			Yu = self.gp_params[gp_params_keys[i-1]]['y']
+			kvar = self.gp_params[gp_params_keys[i-1]]['kvar']
+			#assert kernel ls is at a minimum some small positive number
+			#this avoids issues with getting a singular mat during GP cholesky decomposition
+			ls = (self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5
+			#instantiate GP object
+			gp_regressor = gp.GP(Xu, Yu, kvar, ls, self.y_var)
+			#get xqs, these are inputs for query pts
+			#effectively these are just values of covariates for a given batch
+			xq = covariates[:, i-1]
+			#calc predictions for query points
+			y_q, y_vars = gp_regressor.predict(xq)
+			#calc marginal likelihood for gp
+			gp_mll = gp_regressor.calc_mll(Yu)
+			#add it to gp_loss term
+			gp_loss += gp_mll
+			#add residual prediction from GP to task variable
+			task_var = covariates[:, i-1] + y_q
+			# use this to scale effect map
+			#using EinSum to preserve batch dim
+			cons = torch.einsum('b,bx->bx', task_var, diff)
 			#add cons to init_task param if covariate == 'task'
 			#implementation below was adopted to avoid in place ops that would cause autograd errors
-			#unsure if this is MOST correct way of adding a costum initialization
 			if i==1:
 				cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
 			x_rec = x_rec + cons
-			imgs[keys[i]] = cons.detach().cpu().numpy()
+			imgs[imgs_keys[i]] = cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
-		# calculating loss
-		# New version using torch.distributions modules only
+		# calculating loss for VAE ...
+		# This version uses torch.distributions modules only
 		elbo = -kl.kl_divergence(latent_dist, self.z_prior) #shape = batch_dim
 		#obs_dist.shape = batch_dim, img_dim
 		obs_dist = Normal(x_rec.float(),\
@@ -213,26 +295,15 @@ class VAE(nn.Module):
 		elbo = elbo + sum_log_prob
 		#contract all values using torch.mean()
 		elbo = torch.mean(elbo, dim=0)
+		#adding GP losses to VAE loss
+		#scalling factor is a hyperparam
+		tot_loss = -elbo + self.mll_scale*(-gp_loss)
 		if return_latent_rec:
-			return -elbo, z.detach().cpu().numpy(), imgs
-		return -elbo
-
-		# Original hard-coded version (from Jack)
-		# This  is missing a log term for the nn variable epsilon...
-
-		#elbo = -0.5 * (torch.sum(torch.pow(z,2)) + self.num_latents* \
-		#np.log(2*np.pi)) # B * p(z)
-		#x_diff = x.view(x.shape[0], -1) - x_rec
-		#x_diff = torch.einsum('bi,i->bi', x_diff.view(x.shape[0],-1), torch.exp(-self.epsilon.view(-1).float()))
-		#elbo = elbo + -0.5 * (torch.sum(torch.pow(x_diff, 2)) + IMG_DIM * \
-		#np.log(2*np.pi)) # ~ B * E_{q} p(x|z)
-		#elbo = elbo + torch.sum(latent_dist.entropy()) # ~ B * H[q(z|x)]
-		#if return_latent_rec:
-		#	return -elbo, z.detach().cpu().numpy(), imgs
-		#return -elbo
+			return tot_loss, z.detach().cpu().numpy(), imgs
+		return tot_loss
 
     #commented autograd.detect.anomaly() line  was used to trace out nan loss issue
-	#only use this if trying to trace doing issues with auto-grad
+	#only use this if trying to trace issues with auto-grad
 	#otherwise, it will significantly slow code execution!
 
 	def train_epoch(self, train_loader):
@@ -287,6 +358,28 @@ class VAE(nn.Module):
 		state['save_dir'] = self.save_dir
 		state['epsilon'] = self.epsilon
 		state['task_init'] = self.task_init
+		#add GP nn params to checkpt files
+		state['Y_task'] = self.Y_task
+		state['kvar_task'] = self.kvar_task
+		state['logls_task'] = self.logls_task
+		state['Y_x'] = self.Y_x
+		state['kvar_x'] = self.kvar_x
+		state['logls_x'] = self.logls_x
+		state['Y_y'] = self.Y_y
+		state['kvar_y'] = self.kvar_y
+		state['logls_y'] = self.logls_y
+		state['Y_z'] = self.Y_z
+		state['kvar_z'] = self.kvar_z
+		state['logls_z'] = self.logls_z
+		state['Y_xrot'] = self.Y_xrot
+		state['kvar_xrot'] = self.kvar_xrot
+		state['logls_xrot'] = self.logls_xrot
+		state['Y_yrot'] = self.Y_yrot
+		state['kvar_yrot'] = self.kvar_yrot
+		state['logls_yrot'] = self.logls_yrot
+		state['Y_zrot'] = self.Y_zrot
+		state['kvar_zrot'] = self.kvar_zrot
+		state['logls_zrot'] = self.logls_zrot
 		filename = os.path.join(self.save_dir, filename)
 		torch.save(state, filename)
 
@@ -302,6 +395,28 @@ class VAE(nn.Module):
 		self.epoch = checkpoint['epoch']
 		self.epsilon = checkpoint['epsilon']
 		self.task_init = checkpoint['task_init']
+		#load in GP params from ckpt files
+		self.Y_task = checkpoint['Y_task']
+		self.kvar_task = checkpoint['kvar_task']
+		self.logls_task = checkpoint['logls_task']
+		self.Y_x = checkpoint['Y_x']
+		self.kvar_x = checkpoint['kvar_x']
+		self.logls_x = checkpoint['logls_x']
+		self.Y_y = checkpoint['Y_y']
+		self.kvar_y = checkpoint['kvar_y']
+		self.logls_y = checkpoint['logls_y']
+		self.Y_z = checkpoint['Y_z']
+		self.kvar_z = checkpoint['kvar_z']
+		self.logls_z = checkpoint['logls_z']
+		self.Y_xrot = checkpoint['Y_xrot']
+		self.kvar_xrot = checkpoint['kvar_xrot']
+		self.logls_xrot = checkpoint['logls_xrot']
+		self.Y_yrot = checkpoint['Y_yrot']
+		self.kvar_yrot = checkpoint['kvar_yrot']
+		self.logls_yrot= checkpoint['logls_yrot']
+		self.Y_zrot = checkpoint['Y_zrot']
+		self.kvar_zrot = checkpoint['kvar_zrot']
+		self.logls_zrot = checkpoint['logls_zrot']
 
 	def project_latent(self, loaders_dict, save_dir, title=None, split=98):
 		# plotting only test set since this is un-shuffled.
