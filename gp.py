@@ -3,10 +3,9 @@ Module implementing 1D GP for regressors
 
 This is largely based on Jack's code & on the GP chapter in Kevin Murphy's textbook.
 
-- Added extra method to calculate marginal likelihood for join training w/ VAE
+- Added extra methods to calculate marginal likelihood for join training w/ VAE
 - Added some extras to pass tensors to CUDA as needed
-- To Do's: add a plotting method to look into smoothness of GP as it gets trained 
-
+- Got rid of observation noise (y_var) term
 """
 
 import numpy as np
@@ -15,7 +14,7 @@ from torch.distributions import MultivariateNormal
 
 class GP():
     """1D exact Gaussian Process w/ X-values on a grid and a Gaussian kernel."""
-    def __init__(self, Xu, Yu, k_var, ls, y_var=0.1):
+    def __init__(self, Xu, Yu, k_var, ls):
         """
         Parameters
         ----------
@@ -27,8 +26,6 @@ class GP():
         Vertical variance for Gaussian kernel. Trainable.
         ls : float
         Lengthscale for Gaussian kernel. Trainable.
-        y_var : float
-        Observation noise. Set to 0.1 for now.
         """
         #adding device attr
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
@@ -43,7 +40,8 @@ class GP():
         # Calculate the Cholesky factor of the kernel matrix.
         k = _striped_matrix(self.n)
         k = _distance_to_kernel(k, self.k_var, self.ls, self.step)
-        self.ky = k + y_var*torch.eye(self.n).to(self.device)
+        self.ky = k + 1e-4*torch.eye(self.n).to(self.device)
+        #self.ky = k
         self.k_chol = torch.cholesky(self.ky)
         self.alpha = torch.inverse(self.k_chol.transpose(0,1)) @ torch.inverse(self.k_chol) @ Yu.unsqueeze(1)
 

@@ -38,6 +38,12 @@ help='split # for project latent method. This is # of frames in each dset.')
 #adding beta task map init arg
 parser.add_argument('--task_init', type=str, metavar='N', default='', \
 help='Path to beta map used to init task contrast in model.')
+#adding args for number of inducing points for GPs and mll scale
+#these are mostly useful for troubleshooting GP Training
+parser.add_argument('--num_inducing_pts', type=float, metavar='N', default=10.0, \
+help='Number of inducing points for regressor GPs.')
+parser.add_argument('--mll_scale', type=float, metavar='N', default=2.0, \
+help='Scaling factor for marginal likelihood loss of GPs.')
 
 args = parser.parse_args()
 torch.manual_seed(args.seed)
@@ -53,16 +59,20 @@ else:
 if __name__ == "__main__":
 	main_start = time.time()
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
-	model = vae_reg.VAE(task_init = args.task_init)
+	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, mll_scale = args.mll_scale)
 	#uncomment if starting from pre-trained model state
-	#model.load_state(filename ='/home/dfd4/fmri_vae/resampled/vaereg_NormRegNoPCA/checkpoint_012.tar')
+	#model.load_state(filename ='/hdd/dfd4/fmri_vae_out/GP_test_400/checkpoint_400.tar')
 	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
-	model.project_latent(loaders_dict, title = "Latent space plot", split=args.split, save_dir=args.save_dir)
-	#Uncomment if wanting to do PCA computation after training only (vs. per epoch)
+	model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
+	#model.plot_GPs(loaders_dict, save_dir=args.save_dir)
+	#Uncomment if wanting to do PCA computation after training
 	#model.compute_PCA(loaders_dict, save_dir=args.save_dir)
-	data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
-	idx= 18 # making this 18th item in dset for now. Will be user input later. This is a vol with task == 1
-	item = data.__getitem__(idx)
-	model.reconstruct(item, ref_nii=args.ref_nii, save_dir=args.save_dir)
+	#Uncomment if wishing to reconstruct one sample volume
+	#technically unecessary since all volumes will be reconstructed anyways down the line ...
+	#kept it for troubleshooting purposes ...
+	#data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
+	#idx= 18 # making this 18th item in dset for now. Will be user input later. This is a vol with task == 1
+	#item = data.__getitem__(idx)
+	#model.reconstruct(item, ref_nii=args.ref_nii, save_dir=args.save_dir)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))

@@ -5,9 +5,9 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added 1D GPs to model regressors (task + 6 motion params)
 - Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
 
-To Do's (once GPs are functional...)
-- Implement new save and load state methods (will make code less redundant)
-- Clean up, improve documentation
+To Do's
+- Make code less redundant
+- Improve GP plotting method (do it over entire set, without wasting CPU while looping though dataloaders )
 - Add time dependent latent space plotting (post-NIPs)
 """
 
@@ -36,7 +36,7 @@ IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = ''):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = '', num_inducing_pts=10.0, mll_scale=2.0):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
@@ -61,14 +61,17 @@ class VAE(nn.Module):
 		#init params for GPs
 		#these are Xus (not trainable), Yu's, lengthscale and kernel vars (trainable)
 		#pass these to a big dict -- gp_params
-		self.y_var = torch.as_tensor((0.1)).to(self.device)
-		#for now, not scaling GPs mll loss ... Will change if things don't look smooth
-		self.mll_scale = torch.as_tensor((1.0)).to(self.device)
+		#took out obs noise
+		#self.y_var = torch.as_tensor((0.1)).to(self.device)
+		#testing increasing mll scale
+		self.inducing_pts = num_inducing_pts
+		self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
 		self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
 		#for task
-		self.xu_task = torch.linspace(-0.5, 2.5, 30).to(self.device)
+		#reducing num of inducing points to 10
+		self.xu_task = torch.linspace(-0.5, 2.5, self.inducing_pts).to(self.device)
 		self.gp_params['task']['xu'] = self.xu_task
-		self.Y_task = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.Y_task = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['task']['y'] = self.Y_task
 		self.kvar_task = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
 		self.gp_params['task']['kvar'] = self.kvar_task
@@ -76,27 +79,28 @@ class VAE(nn.Module):
 		self.gp_params['task']['log_ls'] = self.logls_task
 		#Now same for 6 motion GPs
 		#x trans
-		self.xu_x = torch.linspace(-0.2, 0.2, 30).to(self.device)
+		#reducing num of inducing pts to 10
+		self.xu_x = torch.linspace(-0.2, 0.2, self.inducing_pts).to(self.device)
 		self.gp_params['x']['xu'] = self.xu_x
-		self.Y_x = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.Y_x = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['x']['y'] = self.Y_x
 		self.kvar_x = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
 		self.gp_params['x']['kvar'] = self.kvar_x
 		self.logls_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['x']['log_ls'] = self.logls_x
         #y trans
-		self.xu_y = torch.linspace(-0.4, 0.4, 30).to(self.device)
+		self.xu_y = torch.linspace(-0.4, 0.4, self.inducing_pts).to(self.device)
 		self.gp_params['y']['xu'] = self.xu_y
-		self.Y_y = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.Y_y = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['y']['y'] = self.Y_y
 		self.kvar_y = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
 		self.gp_params['y']['kvar'] = self.kvar_y
 		self.logls_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['y']['log_ls'] = self.logls_y
 		#z trans
-		self.xu_z = torch.linspace(-0.5, 0.5, 30).to(self.device)
+		self.xu_z = torch.linspace(-0.5, 0.5, self.inducing_pts).to(self.device)
 		self.gp_params['z']['xu'] = self.xu_z
-		self.Y_z = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.Y_z = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['z']['y'] = self.Y_z
 		self.kvar_z = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
 		self.gp_params['z']['kvar'] = self.kvar_z
@@ -104,27 +108,28 @@ class VAE(nn.Module):
 		self.gp_params['z']['log_ls'] = self.logls_z
 		#rotational ones
 		#xrot
-		self.xu_xrot = torch.linspace(-0.01, 0.01, 30).to(self.device)
+		#reducing number of inducing points to 10
+		self.xu_xrot = torch.linspace(-0.01, 0.01, self.inducing_pts).to(self.device)
 		self.gp_params['xrot']['xu'] = self.xu_xrot
-		self.Y_xrot = torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.Y_xrot = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['xrot']['y'] = self.Y_xrot
 		self.kvar_xrot= torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
 		self.gp_params['xrot']['kvar'] = self.kvar_xrot
 		self.logls_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['xrot']['log_ls'] = self.logls_xrot
 		#yrot
-		self.xu_yrot = torch.linspace(-0.005, 0.005, 30).to(self.device)
+		self.xu_yrot = torch.linspace(-0.005, 0.005, self.inducing_pts).to(self.device)
 		self.gp_params['yrot']['xu'] = self.xu_yrot
-		self.Y_yrot= torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.Y_yrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['yrot']['y'] = self.Y_yrot
 		self.kvar_yrot = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
 		self.gp_params['yrot']['kvar'] = self.kvar_yrot
 		self.logls_yrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['yrot']['log_ls'] = self.logls_yrot
 		#zrot
-		self.xu_zrot = torch.linspace(-0.005, 0.005, 30).to(self.device)
+		self.xu_zrot = torch.linspace(-0.005, 0.005, self.inducing_pts).to(self.device)
 		self.gp_params['zrot']['xu'] = self.xu_zrot
-		self.Y_zrot= torch.nn.Parameter(torch.rand(30).to(self.device))
+		self.Y_zrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['zrot']['y'] = self.Y_zrot
 		self.kvar_zrot= torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
 		self.gp_params['zrot']['kvar'] = self.kvar_zrot
@@ -261,7 +266,7 @@ class VAE(nn.Module):
 			#this avoids issues with getting a singular mat during GP cholesky decomposition
 			ls = (self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5
 			#instantiate GP object
-			gp_regressor = gp.GP(Xu, Yu, kvar, ls, self.y_var)
+			gp_regressor = gp.GP(Xu, Yu, kvar, ls)
 			#get xqs, these are inputs for query pts
 			#effectively these are just values of covariates for a given batch
 			xq = covariates[:, i-1]
@@ -500,6 +505,60 @@ class VAE(nn.Module):
 				input_nifti = nib.load(ref_nii)
 				recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
 				nib.save(recon_nifti, filepath)
+
+	def plot_GPs(self, loaders_dict, save_dir = ''):
+		"""
+		Plot inducing points &
+		posterior mean +/- 2tds for a trained GPs
+
+		Parameters
+		----------
+		loaders_dict: torch dataloader dict
+		              Divided up into train and test
+
+		ToDo's: find more efficient way to plot these
+				looping though DataLoader fast is NOT a good idea...
+		"""
+		regressors = list(self.gp_params.keys())
+		for i in range(len(regressors)):
+			#build GP for the regressor
+			xu = self.gp_params[regressors[i]]['xu']
+			yu = self.gp_params[regressors[i]]['y']
+			kvar = self.gp_params[regressors[i]]['kvar']
+			ls = (self.gp_params[regressors[i]]['log_ls']).exp() + 0.5
+			gp_regressor = gp.GP(xu, yu, kvar, ls)
+			for j, sample in enumerate(loaders_dict['test']):
+				if j <= 0:
+					covariates = sample['covariates']
+					covariates = covariates.to(self.device)
+					xq = covariates[:, i]
+					yq, yvar = gp_regressor.predict(xq)
+					#pass vars to cpu and np prior to plotting
+					x_u = xu.detach().cpu().numpy()
+					y_u = yu.detach().cpu().numpy()
+					x_q = xq.detach().cpu().numpy()
+					y_q = yq.detach().cpu().numpy()
+					y_var = yvar.detach().cpu().numpy()
+					#create plot and save it
+					plt.scatter(x_u, y_u, c='k', label='inducing points')
+					plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
+					two_sigma = 2*np.sqrt(y_var)
+					kwargs = {'color':'b', 'alpha':0.2, 'label':'2 sigma'}
+					plt.fill_between(x_q, y_q-two_sigma, y_q+two_sigma, **kwargs)
+					plt.legend(loc='best')
+					plt.title('GP Plot {}_{}'.format(regressors[i], str(int(j))))
+					plt.xlabel('X')
+					plt.ylabel('Y')
+					#save plot & clean it ...
+					plot_dir = os.path.join(save_dir, 'GP_plots')
+					if not os.path.exists(plot_dir):
+						os.makedirs(plot_dir)
+					filename = 'GP_{}_{}.pdf'.format(regressors[i], str(int(j)))
+					file_path = os.path.join(plot_dir, filename)
+					plt.savefig(file_path)
+					plt.clf()
+				else:
+					pass
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
