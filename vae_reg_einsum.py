@@ -385,6 +385,8 @@ class VAE(nn.Module):
 		state['Y_zrot'] = self.Y_zrot
 		state['kvar_zrot'] = self.kvar_zrot
 		state['logls_zrot'] = self.logls_zrot
+		state['mll_scale'] = self.mll_scale
+		state['inducing_pts'] = self.inducing_pts
 		filename = os.path.join(self.save_dir, filename)
 		torch.save(state, filename)
 
@@ -422,6 +424,8 @@ class VAE(nn.Module):
 		self.Y_zrot = checkpoint['Y_zrot']
 		self.kvar_zrot = checkpoint['kvar_zrot']
 		self.logls_zrot = checkpoint['logls_zrot']
+		self.mll_scale = checkpoint['mll_scale']
+		self.inducing_pts = checkpoint['inducing_pts']
 
 	def project_latent(self, loaders_dict, save_dir, title=None, split=98):
 		# plotting only test set since this is un-shuffled.
