@@ -1,10 +1,12 @@
 """
 Short script to add a control signal to original pre_processed data.
 
-Control signal consists of 4 small spheres added to frontal lobe.
+Control signals can be of 2 types:
+1) Simple: 4 small spheres added to frontal lobe.
+2) Challenging: a number -- in this case '3' added to frontal lobe
 
 DOES NOT overwrite original data -- instead, it writes output to same subdir as original.
-Suffix 'altered', signal magnitude and a time-stamp are added to output name to mark this operation.
+Suffix 'altered', type of signal, signal magnitude and a time-stamp are added to output name to mark this operation.
 
 Artifitial signal time series is first convolved with HRF prior to adding to volume time series
 Block-design chosen was opposite to one seen for real effect in V1.
@@ -19,7 +21,13 @@ import numpy as np
 import argparse
 import scipy.stats
 from scipy.stats import gamma # for HRF funct
+import scipy
+from scipy import ndimage #to rotate added signals
 from copy import deepcopy
+import torch
+import torchvision
+import torchvision.datasets as datasets # to get mnist digit dset
+from PIL import Image
 
 #get user args
 parser = argparse.ArgumentParser(description='user args for adding control signal')
@@ -28,10 +36,12 @@ parser.add_argument('--root_dir', type=str, metavar='N', default='', \
 help='Root dir where original .nii and .tsv files are located')
 parser.add_argument('--intensity', type=float, metavar='N', default=500, \
 help='Abs value of spherical signals added to data.')
+parser.add_argument('--type', type=str, metavar='N', default='simple', \
+help='Type of control signal added. Simple refers to spheres.')
 parser.add_argument('--radius', type=int, metavar='N', default=1, \
-help='Radius of spheres to be added.')
+help='Radius of spheres to be added.Only used if type == simple')
 parser.add_argument('--size', type=int, metavar='N', default=7, \
-help='Size of 3D array containing spherical masks. This is a cube of dim A*A*A')
+help='Dim of 3D array containing spherical masks. This is an A*A*A cube. Only used if type == simple')
 
 args = parser.parse_args()
 
@@ -118,19 +128,46 @@ for i in range(len(subjs)):
 
 #these are dims for checker dset
 IMG_SHAPE = (41, 49, 35, 98)
-#create small sphere w/ desired intensity
-sphere = mk_spherical_mask(size=args.size, radius=args.radius)
-spherical_mask = args.intensity * sphere
-#create empty arr with same img dim to add control signal to
-control_sig = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
-#add 4 spheres to desired locations
-#these were chosen to be around frontal lobe by plotting/visual inspection
-#if size of sphere arr is changed, ranges have to be modified appropriately...
-#this can be made more fkexible if desired ...
-control_sig[15:22, 34:41, 14:21]+= spherical_mask
-control_sig[13:20, 38:45, 15:22]+= spherical_mask
-control_sig[20:27, 38:45, 15:22]+= spherical_mask
-control_sig[16:23, 38:45, 20:27]+= spherical_mask
+
+if args.type == 'simple':
+    #create small sphere w/ desired intensity
+    sphere = mk_spherical_mask(size=args.size, radius=args.radius)
+    spherical_mask = args.intensity * sphere
+    #create empty arr with same img dim to add control signal to
+    control_sig = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
+    #add 4 spheres to desired locations
+    #these were chosen to be around frontal lobe by plotting/visual inspection
+    #if size of sphere arr is changed, ranges have to be modified appropriately...
+    #this can be made more fkexible in future iterations of code ...
+    control_sig[15:22, 34:41, 14:21]+= spherical_mask
+    control_sig[13:20, 38:45, 15:22]+= spherical_mask
+    control_sig[20:27, 38:45, 15:22]+= spherical_mask
+    control_sig[16:23, 38:45, 20:27]+= spherical_mask
+else:
+    #get mnist dataset
+    mnist_trainset = datasets.MNIST(root='./data', train=True, download=True,\
+    transform=None)
+    #create small list w/ 2-3 numbers we might use
+    imgs = []
+    for i, sample in enumerate(mnist_trainset):
+        if i <=7:
+            target = sample[1]
+            #get a 2 and a 3. WIll use 3 only for now...
+            if target == 2 or target ==3:
+                img = sample[0]
+                imgs.append(img)
+            else:
+                pass
+    #get just one of these nmbers, say '3'
+    three = imgs[1].resize((13, 13)) #resize it
+    three = np.asarray(three)
+    norm_three = three/255 #scale
+    sig_three = args.intensity*norm_three #multiply by signal intensity
+    rot_sig = ndimage.rotate(sig_three, -90) #this is needed given struct of fmri arr
+    signal = np.broadcast_to(rot_sig, (10, 13, 13)) #broadcast to desired shape
+    #create empty arr to hold control signal
+    control_sig = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
+    control_sig[15:25, 34:47, 9:22]+= signal
 
 #now get time series convolution
 #TR and 0-20 range established based on acquisition & task design params for checker dset
@@ -164,8 +201,8 @@ for i in range(len(subjs)):
         vol += conv_signal
         altered_data[:, :, :, j] = vol
     #save alt subj dataset to diff path under same subdir
-    #'_ALTERED_' suffix , signal intensity and date are added to output fname
-    alt_path = original_path.rstrip('.nii.gz') +'_ALTERED_' + intensity_as_str + \
+    #'_ALTERED_' suffix , control type, signal intensity and date are added to output fname
+    alt_path = original_path.rstrip('.nii.gz') +'_ALTERED_' + args.type + '_' + intensity_as_str + \
     '_' + ts.strftime('%m_%d_%Y') + '.nii.gz'
     alt_nii = nib.Nifti1Image(altered_data, orig_nii.affine, orig_nii.header)
     nib.save(alt_nii, alt_path)
