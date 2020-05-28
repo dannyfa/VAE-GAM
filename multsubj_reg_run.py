@@ -1,8 +1,7 @@
 """
 Wrapper to call in data class, loaders and vae_reg model
-
-To DO's
-- clean up: PCA method call (not needed likely), end reconstruction lines ...
+ToDo:
+-- add loading saved ckpoint as a subroutine
 
 """
 import os, sys
@@ -40,7 +39,7 @@ parser.add_argument('--task_init', type=str, metavar='N', default='', \
 help='Path to beta map used to init task contrast in model.')
 #adding args for number of inducing points for GPs and mll scale
 #these are mostly useful for troubleshooting GP Training
-parser.add_argument('--num_inducing_pts', type=float, metavar='N', default=10.0, \
+parser.add_argument('--num_inducing_pts', type=int, metavar='N', default=6, \
 help='Number of inducing points for regressor GPs.')
 parser.add_argument('--mll_scale', type=float, metavar='N', default=2.0, \
 help='Scaling factor for marginal likelihood loss of GPs.')
@@ -64,15 +63,6 @@ if __name__ == "__main__":
 	#model.load_state(filename ='/hdd/dfd4/fmri_vae_out/GP_test_400/checkpoint_400.tar')
 	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
 	model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
-	#model.plot_GPs(loaders_dict, save_dir=args.save_dir)
-	#Uncomment if wanting to do PCA computation after training
-	#model.compute_PCA(loaders_dict, save_dir=args.save_dir)
-	#Uncomment if wishing to reconstruct one sample volume
-	#technically unecessary since all volumes will be reconstructed anyways down the line ...
-	#kept it for troubleshooting purposes ...
-	#data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
-	#idx= 18 # making this 18th item in dset for now. Will be user input later. This is a vol with task == 1
-	#item = data.__getitem__(idx)
-	#model.reconstruct(item, ref_nii=args.ref_nii, save_dir=args.save_dir)
+	model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))

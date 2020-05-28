@@ -6,9 +6,9 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
 
 To Do's
-- Make code less redundant
-- Improve GP plotting method (do it over entire set, without wasting CPU while looping though dataloaders )
-- Add time dependent latent space plotting (post-NIPs)
+- Make code less redundant ***
+- Improve on loading/save methods ***
+- Add time dependent latent space plotting ***
 """
 
 import matplotlib.pyplot as plt
@@ -30,6 +30,7 @@ import os
 import itertools
 from sklearn.decomposition import PCA
 import gp #module with GP class
+import pandas as pd
 
 # maintained shape of original nn by downsampling data on preprocessing
 IMG_SHAPE = (41,49,35)
@@ -63,12 +64,10 @@ class VAE(nn.Module):
 		#pass these to a big dict -- gp_params
 		#took out obs noise
 		#self.y_var = torch.as_tensor((0.1)).to(self.device)
-		#testing increasing mll scale
 		self.inducing_pts = num_inducing_pts
 		self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
 		self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
 		#for task
-		#reducing num of inducing points to 10
 		self.xu_task = torch.linspace(-0.5, 2.5, self.inducing_pts).to(self.device)
 		self.gp_params['task']['xu'] = self.xu_task
 		self.Y_task = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
@@ -79,7 +78,6 @@ class VAE(nn.Module):
 		self.gp_params['task']['log_ls'] = self.logls_task
 		#Now same for 6 motion GPs
 		#x trans
-		#reducing num of inducing pts to 10
 		self.xu_x = torch.linspace(-0.2, 0.2, self.inducing_pts).to(self.device)
 		self.gp_params['x']['xu'] = self.xu_x
 		self.Y_x = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
@@ -89,7 +87,7 @@ class VAE(nn.Module):
 		self.logls_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['x']['log_ls'] = self.logls_x
         #y trans
-		self.xu_y = torch.linspace(-0.4, 0.4, self.inducing_pts).to(self.device)
+		self.xu_y = torch.linspace(-0.3, 0.4, self.inducing_pts).to(self.device)
 		self.gp_params['y']['xu'] = self.xu_y
 		self.Y_y = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['y']['y'] = self.Y_y
@@ -98,7 +96,7 @@ class VAE(nn.Module):
 		self.logls_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['y']['log_ls'] = self.logls_y
 		#z trans
-		self.xu_z = torch.linspace(-0.5, 0.5, self.inducing_pts).to(self.device)
+		self.xu_z = torch.linspace(-0.4, 0.5, self.inducing_pts).to(self.device)
 		self.gp_params['z']['xu'] = self.xu_z
 		self.Y_z = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['z']['y'] = self.Y_z
@@ -108,8 +106,7 @@ class VAE(nn.Module):
 		self.gp_params['z']['log_ls'] = self.logls_z
 		#rotational ones
 		#xrot
-		#reducing number of inducing points to 10
-		self.xu_xrot = torch.linspace(-0.01, 0.01, self.inducing_pts).to(self.device)
+		self.xu_xrot = torch.linspace(-0.007, 0.006, self.inducing_pts).to(self.device)
 		self.gp_params['xrot']['xu'] = self.xu_xrot
 		self.Y_xrot = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['xrot']['y'] = self.Y_xrot
@@ -118,7 +115,7 @@ class VAE(nn.Module):
 		self.logls_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['xrot']['log_ls'] = self.logls_xrot
 		#yrot
-		self.xu_yrot = torch.linspace(-0.005, 0.005, self.inducing_pts).to(self.device)
+		self.xu_yrot = torch.linspace(-0.002, 0.003, self.inducing_pts).to(self.device)
 		self.gp_params['yrot']['xu'] = self.xu_yrot
 		self.Y_yrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['yrot']['y'] = self.Y_yrot
@@ -127,7 +124,7 @@ class VAE(nn.Module):
 		self.logls_yrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['yrot']['log_ls'] = self.logls_yrot
 		#zrot
-		self.xu_zrot = torch.linspace(-0.005, 0.005, self.inducing_pts).to(self.device)
+		self.xu_zrot = torch.linspace(-0.003, 0.002, self.inducing_pts).to(self.device)
 		self.gp_params['zrot']['xu'] = self.xu_zrot
 		self.Y_zrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['zrot']['y'] = self.Y_zrot
@@ -316,7 +313,6 @@ class VAE(nn.Module):
 		train_loss = 0.0
 		#with autograd.detect_anomaly():
 		for batch_idx, sample in enumerate(train_loader):
-			#Inputs now come from dataloader dicts
 			x = sample['volume']
 			x = x.to(self.device)
 			covariates = sample['covariates']
@@ -466,29 +462,6 @@ class VAE(nn.Module):
 		#Uncomment this if we actually wish to get latent and projections
 		#return latent, projection
 
-    # Adding new method to compute PCA for latent means.
-	# This can be done per epoch or after some training
-	#cmt since no longer needed
-	#def compute_PCA(self, loaders_dict, save_dir):
-	#	csv_file = 'PCA_2n.csv'
-	#	csv_path = os.path.join(save_dir, csv_file)
-	#	latents = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
-	#	with torch.no_grad():
-	#		j = 0
-	#		for i, sample in enumerate(loaders_dict['test']):
-	#			x = sample['volume']
-	#			x = x.to(self.device)
-	#			mu, _, _ = self.encode(x)
-	#			latents[j:j+len(mu)] = mu.detach().cpu().numpy()
-	#			j += len(mu)
-	#	print("="*40)
-	#	print('Computing latent means PCA')
-		# not setting number of components... This should keep all PCs. Max is 32 here
-	#	pca = PCA()
-	#	components = pca.fit_transform(latents)
-	#	print("Number of components: {}".format(pca.n_components_))
-	#	print("Explained variance: {}".format(pca.explained_variance_))
-
 	def reconstruct(self, item, ref_nii, save_dir):
 		"""Reconstruct a volume and its cons given a dset idx."""
 		x = item['volume'].unsqueeze(0)
@@ -510,19 +483,24 @@ class VAE(nn.Module):
 				recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
 				nib.save(recon_nifti, filepath)
 
-	def plot_GPs(self, loaders_dict, save_dir = ''):
+	def plot_GPs(self, csv_file = '', save_dir = ''):
 		"""
 		Plot inducing points &
 		posterior mean +/- 2tds for a trained GPs
 
 		Parameters
 		----------
-		loaders_dict: torch dataloader dict
-		              Divided up into train and test
+		csv_file: file containing data for model
+		           this is the same used for data laoders
+				   Will take only covariates from it though...
 
-		ToDo's: find more efficient way to plot these
-				looping though DataLoader fast is NOT a good idea...
 		"""
+		#read in values for each regressor from csv_file
+		#pass them to torch as a float tensor
+		data = pd.read_csv(csv_file)
+		all_covariates = data[['task', 'x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']]
+		all_covariates = all_covariates.to_numpy()
+		all_covariates = torch.from_numpy(all_covariates)
 		regressors = list(self.gp_params.keys())
 		for i in range(len(regressors)):
 			#build GP for the regressor
@@ -531,38 +509,93 @@ class VAE(nn.Module):
 			kvar = self.gp_params[regressors[i]]['kvar']
 			ls = (self.gp_params[regressors[i]]['log_ls']).exp() + 0.5
 			gp_regressor = gp.GP(xu, yu, kvar, ls)
-			for j, sample in enumerate(loaders_dict['test']):
-				if j <= 0:
-					covariates = sample['covariates']
-					covariates = covariates.to(self.device)
-					xq = covariates[:, i]
-					yq, yvar = gp_regressor.predict(xq)
+			#get all xi's for regressor
+			#get prediction
+			covariates = all_covariates[:, i]
+			xq = covariates.to(self.device)
+			yq, yvar = gp_regressor.predict(xq)
+			#pass vars to cpu and np prior to plotting
+			x_u = xu.detach().cpu().numpy()
+			y_u = yu.detach().cpu().numpy()
+			x_q = xq.detach().cpu().numpy()
+			y_q = yq.detach().cpu().numpy()
+			y_var = yvar.detach().cpu().numpy()
+			#create plot and save it
+			plt.scatter(x_u, y_u, c='k', label='inducing points')
+			plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
+			two_sigma = 2*np.sqrt(y_var)
+			kwargs = {'color':'b', 'alpha':0.2, 'label':'2 sigma'}
+			plt.fill_between(x_q, y_q-two_sigma, y_q+two_sigma, **kwargs)
+			plt.legend(loc='best')
+			plt.title('GP Plot {}_{}'.format(regressors[i], 'full_set'))
+			plt.xlabel('X')
+			plt.ylabel('Y')
+			#save plot & clean it ...
+			plot_dir = os.path.join(save_dir, 'GP_plots')
+			if not os.path.exists(plot_dir):
+				os.makedirs(plot_dir)
+			filename = 'GP_{}_{}.pdf'.format(regressors[i], 'full_set')
+			file_path = os.path.join(plot_dir, filename)
+			plt.savefig(file_path)
+			plt.clf()
+
+    # this is old version of method to plot GPs
+	# plots results for first ith batches
+	# overall slower
+
+	#def plot_GPs(self, loaders_dict, save_dir = ''):
+	#	"""
+	#	Plot inducing points &
+	#	posterior mean +/- 2tds for a trained GPs
+
+	#	Parameters
+	#	----------
+	#	loaders_dict: torch dataloader dict
+	#	              Divided up into train and test
+
+	#	ToDo's: find more efficient way to plot these
+	#			looping though DataLoader fast is NOT a good idea...
+	#	"""
+	#	regressors = list(self.gp_params.keys())
+	#	for i in range(len(regressors)):
+			#build GP for the regressor
+	#		xu = self.gp_params[regressors[i]]['xu']
+	#		yu = self.gp_params[regressors[i]]['y']
+	#		kvar = self.gp_params[regressors[i]]['kvar']
+	#		ls = (self.gp_params[regressors[i]]['log_ls']).exp() + 0.5
+	#		gp_regressor = gp.GP(xu, yu, kvar, ls)
+	#		for j, sample in enumerate(loaders_dict['test']):
+	#			if j <= 0:
+	#				covariates = sample['covariates']
+	#				covariates = covariates.to(self.device)
+	#				xq = covariates[:, i]
+	#				yq, yvar = gp_regressor.predict(xq)
 					#pass vars to cpu and np prior to plotting
-					x_u = xu.detach().cpu().numpy()
-					y_u = yu.detach().cpu().numpy()
-					x_q = xq.detach().cpu().numpy()
-					y_q = yq.detach().cpu().numpy()
-					y_var = yvar.detach().cpu().numpy()
+	#				x_u = xu.detach().cpu().numpy()
+	#				y_u = yu.detach().cpu().numpy()
+	#				x_q = xq.detach().cpu().numpy()
+	#				y_q = yq.detach().cpu().numpy()
+	#				y_var = yvar.detach().cpu().numpy()
 					#create plot and save it
-					plt.scatter(x_u, y_u, c='k', label='inducing points')
-					plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
-					two_sigma = 2*np.sqrt(y_var)
-					kwargs = {'color':'b', 'alpha':0.2, 'label':'2 sigma'}
-					plt.fill_between(x_q, y_q-two_sigma, y_q+two_sigma, **kwargs)
-					plt.legend(loc='best')
-					plt.title('GP Plot {}_{}'.format(regressors[i], str(int(j))))
-					plt.xlabel('X')
-					plt.ylabel('Y')
+	#				plt.scatter(x_u, y_u, c='k', label='inducing points')
+	#				plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
+	#				two_sigma = 2*np.sqrt(y_var)
+	#				kwargs = {'color':'b', 'alpha':0.2, 'label':'2 sigma'}
+	#				plt.fill_between(x_q, y_q-two_sigma, y_q+two_sigma, **kwargs)
+	#				plt.legend(loc='best')
+	#				plt.title('GP Plot {}_{}'.format(regressors[i], str(int(j))))
+	#				plt.xlabel('X')
+	#				plt.ylabel('Y')
 					#save plot & clean it ...
-					plot_dir = os.path.join(save_dir, 'GP_plots')
-					if not os.path.exists(plot_dir):
-						os.makedirs(plot_dir)
-					filename = 'GP_{}_{}.pdf'.format(regressors[i], str(int(j)))
-					file_path = os.path.join(plot_dir, filename)
-					plt.savefig(file_path)
-					plt.clf()
-				else:
-					pass
+	#				plot_dir = os.path.join(save_dir, 'GP_plots')
+	#				if not os.path.exists(plot_dir):
+	#					os.makedirs(plot_dir)
+	#				filename = 'GP_{}_{}.pdf'.format(regressors[i], str(int(j)))
+	#				file_path = os.path.join(plot_dir, filename)
+	#				plt.savefig(file_path)
+	#				plt.clf()
+	#			else:
+	#				pass
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
@@ -575,8 +608,6 @@ class VAE(nn.Module):
 			#Run through the training data and record a loss.
 			loss = self.train_epoch(loaders['train'])
 			self.loss['train'][epoch] = loss
-			# Uncomment if adding  PCA calc for each training epoch.
-			# self.compute_PCA(loaders_dict=loaders, save_dir = save_dir)
 			# Run through the test data and record a loss.
 			if (test_freq is not None) and (epoch % test_freq == 0):
 				loss = self.test_epoch(loaders['test'])
