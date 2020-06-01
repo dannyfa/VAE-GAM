@@ -521,6 +521,7 @@ class VAE(nn.Module):
 			y_q = yq.detach().cpu().numpy()
 			y_var = yvar.detach().cpu().numpy()
 			#create plot and save it
+			plt.clf()
 			plt.scatter(x_u, y_u, c='k', label='inducing points')
 			plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
 			two_sigma = 2*np.sqrt(y_var)
@@ -537,65 +538,6 @@ class VAE(nn.Module):
 			filename = 'GP_{}_{}.pdf'.format(regressors[i], 'full_set')
 			file_path = os.path.join(plot_dir, filename)
 			plt.savefig(file_path)
-			plt.clf()
-
-    # this is old version of method to plot GPs
-	# plots results for first ith batches
-	# overall slower
-
-	#def plot_GPs(self, loaders_dict, save_dir = ''):
-	#	"""
-	#	Plot inducing points &
-	#	posterior mean +/- 2tds for a trained GPs
-
-	#	Parameters
-	#	----------
-	#	loaders_dict: torch dataloader dict
-	#	              Divided up into train and test
-
-	#	ToDo's: find more efficient way to plot these
-	#			looping though DataLoader fast is NOT a good idea...
-	#	"""
-	#	regressors = list(self.gp_params.keys())
-	#	for i in range(len(regressors)):
-			#build GP for the regressor
-	#		xu = self.gp_params[regressors[i]]['xu']
-	#		yu = self.gp_params[regressors[i]]['y']
-	#		kvar = self.gp_params[regressors[i]]['kvar']
-	#		ls = (self.gp_params[regressors[i]]['log_ls']).exp() + 0.5
-	#		gp_regressor = gp.GP(xu, yu, kvar, ls)
-	#		for j, sample in enumerate(loaders_dict['test']):
-	#			if j <= 0:
-	#				covariates = sample['covariates']
-	#				covariates = covariates.to(self.device)
-	#				xq = covariates[:, i]
-	#				yq, yvar = gp_regressor.predict(xq)
-					#pass vars to cpu and np prior to plotting
-	#				x_u = xu.detach().cpu().numpy()
-	#				y_u = yu.detach().cpu().numpy()
-	#				x_q = xq.detach().cpu().numpy()
-	#				y_q = yq.detach().cpu().numpy()
-	#				y_var = yvar.detach().cpu().numpy()
-					#create plot and save it
-	#				plt.scatter(x_u, y_u, c='k', label='inducing points')
-	#				plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
-	#				two_sigma = 2*np.sqrt(y_var)
-	#				kwargs = {'color':'b', 'alpha':0.2, 'label':'2 sigma'}
-	#				plt.fill_between(x_q, y_q-two_sigma, y_q+two_sigma, **kwargs)
-	#				plt.legend(loc='best')
-	#				plt.title('GP Plot {}_{}'.format(regressors[i], str(int(j))))
-	#				plt.xlabel('X')
-	#				plt.ylabel('Y')
-					#save plot & clean it ...
-	#				plot_dir = os.path.join(save_dir, 'GP_plots')
-	#				if not os.path.exists(plot_dir):
-	#					os.makedirs(plot_dir)
-	#				filename = 'GP_{}_{}.pdf'.format(regressors[i], str(int(j)))
-	#				file_path = os.path.join(plot_dir, filename)
-	#				plt.savefig(file_path)
-	#				plt.clf()
-	#			else:
-	#				pass
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
