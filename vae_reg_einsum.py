@@ -6,9 +6,10 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
 
 To Do's
-- Make code less redundant ***
-- Improve on loading/save methods ***
-- Add time dependent latent space plotting ***
+- Fix frontal lobe noise picked up in task contrast map ***
+- Make any needed adaptations for HCP dataset
+- Improve code
+- Add time dependent latent space plotting
 """
 
 import matplotlib.pyplot as plt
@@ -62,18 +63,17 @@ class VAE(nn.Module):
 		#init params for GPs
 		#these are Xus (not trainable), Yu's, lengthscale and kernel vars (trainable)
 		#pass these to a big dict -- gp_params
-		#took out obs noise
-		#self.y_var = torch.as_tensor((0.1)).to(self.device)
 		self.inducing_pts = num_inducing_pts
 		self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
+		self.max_ls = torch.as_tensor(7.0).to(self.device) #this might be too large...
 		self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
 		#for task
 		self.xu_task = torch.linspace(-0.5, 2.5, self.inducing_pts).to(self.device)
 		self.gp_params['task']['xu'] = self.xu_task
 		self.Y_task = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['task']['y'] = self.Y_task
-		self.kvar_task = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-		self.gp_params['task']['kvar'] = self.kvar_task
+		self.logkvar_task = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['task']['logkvar'] = self.logkvar_task
 		self.logls_task = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['task']['log_ls'] = self.logls_task
 		#Now same for 6 motion GPs
@@ -82,8 +82,8 @@ class VAE(nn.Module):
 		self.gp_params['x']['xu'] = self.xu_x
 		self.Y_x = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['x']['y'] = self.Y_x
-		self.kvar_x = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-		self.gp_params['x']['kvar'] = self.kvar_x
+		self.logkvar_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['x']['logkvar'] = self.logkvar_x
 		self.logls_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['x']['log_ls'] = self.logls_x
         #y trans
@@ -91,8 +91,8 @@ class VAE(nn.Module):
 		self.gp_params['y']['xu'] = self.xu_y
 		self.Y_y = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['y']['y'] = self.Y_y
-		self.kvar_y = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-		self.gp_params['y']['kvar'] = self.kvar_y
+		self.logkvar_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['y']['logkvar'] = self.logkvar_y
 		self.logls_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['y']['log_ls'] = self.logls_y
 		#z trans
@@ -100,8 +100,8 @@ class VAE(nn.Module):
 		self.gp_params['z']['xu'] = self.xu_z
 		self.Y_z = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['z']['y'] = self.Y_z
-		self.kvar_z = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-		self.gp_params['z']['kvar'] = self.kvar_z
+		self.logkvar_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['z']['logkvar'] = self.logkvar_z
 		self.logls_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['z']['log_ls'] = self.logls_z
 		#rotational ones
@@ -110,8 +110,8 @@ class VAE(nn.Module):
 		self.gp_params['xrot']['xu'] = self.xu_xrot
 		self.Y_xrot = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['xrot']['y'] = self.Y_xrot
-		self.kvar_xrot= torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-		self.gp_params['xrot']['kvar'] = self.kvar_xrot
+		self.logkvar_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['xrot']['logkvar'] = self.logkvar_xrot
 		self.logls_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['xrot']['log_ls'] = self.logls_xrot
 		#yrot
@@ -119,8 +119,8 @@ class VAE(nn.Module):
 		self.gp_params['yrot']['xu'] = self.xu_yrot
 		self.Y_yrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['yrot']['y'] = self.Y_yrot
-		self.kvar_yrot = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-		self.gp_params['yrot']['kvar'] = self.kvar_yrot
+		self.logkvar_yrot = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['yrot']['logkvar'] = self.logkvar_yrot
 		self.logls_yrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['yrot']['log_ls'] = self.logls_yrot
 		#zrot
@@ -128,8 +128,8 @@ class VAE(nn.Module):
 		self.gp_params['zrot']['xu'] = self.xu_zrot
 		self.Y_zrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['zrot']['y'] = self.Y_zrot
-		self.kvar_zrot= torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-		self.gp_params['zrot']['kvar'] = self.kvar_zrot
+		self.logkvar_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+		self.gp_params['zrot']['logkvar'] = self.logkvar_zrot
 		self.logls_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['zrot']['log_ls'] = self.logls_zrot
 		# init z_prior
@@ -258,11 +258,12 @@ class VAE(nn.Module):
 			#get params for GP regressor
 			Xu = self.gp_params[gp_params_keys[i-1]]['xu']
 			Yu = self.gp_params[gp_params_keys[i-1]]['y']
-			kvar = self.gp_params[gp_params_keys[i-1]]['kvar']
-			#assert kernel ls is at a minimum some small positive number
-			#this avoids issues with getting a singular mat during GP cholesky decomposition
-			ls = (self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5
-			#instantiate GP object
+			#assert kvar is at least some small + number
+			#assert ls doesn't grow to infinity
+			#these will avoid issues with cholesky decomposition on gp module
+			kvar = (self.gp_params[gp_params_keys[i-1]]['logkvar']).exp() + 0.1
+			sig = nn.Sigmoid()
+			ls = self.max_ls * sig((self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5)
 			gp_regressor = gp.GP(Xu, Yu, kvar, ls)
 			#get xqs, these are inputs for query pts
 			#effectively these are just values of covariates for a given batch
@@ -361,25 +362,25 @@ class VAE(nn.Module):
 		state['task_init'] = self.task_init
 		#add GP nn params to checkpt files
 		state['Y_task'] = self.Y_task
-		state['kvar_task'] = self.kvar_task
+		state['logkvar_task'] = self.logkvar_task
 		state['logls_task'] = self.logls_task
 		state['Y_x'] = self.Y_x
-		state['kvar_x'] = self.kvar_x
+		state['logkvar_x'] = self.logkvar_x
 		state['logls_x'] = self.logls_x
 		state['Y_y'] = self.Y_y
-		state['kvar_y'] = self.kvar_y
+		state['logkvar_y'] = self.logkvar_y
 		state['logls_y'] = self.logls_y
 		state['Y_z'] = self.Y_z
-		state['kvar_z'] = self.kvar_z
+		state['logkvar_z'] = self.logkvar_z
 		state['logls_z'] = self.logls_z
 		state['Y_xrot'] = self.Y_xrot
-		state['kvar_xrot'] = self.kvar_xrot
+		state['logkvar_xrot'] = self.logkvar_xrot
 		state['logls_xrot'] = self.logls_xrot
 		state['Y_yrot'] = self.Y_yrot
-		state['kvar_yrot'] = self.kvar_yrot
+		state['logkvar_yrot'] = self.logkvar_yrot
 		state['logls_yrot'] = self.logls_yrot
 		state['Y_zrot'] = self.Y_zrot
-		state['kvar_zrot'] = self.kvar_zrot
+		state['logkvar_zrot'] = self.logkvar_zrot
 		state['logls_zrot'] = self.logls_zrot
 		state['mll_scale'] = self.mll_scale
 		state['inducing_pts'] = self.inducing_pts
@@ -400,25 +401,25 @@ class VAE(nn.Module):
 		self.task_init = checkpoint['task_init']
 		#load in GP params from ckpt files
 		self.Y_task = checkpoint['Y_task']
-		self.kvar_task = checkpoint['kvar_task']
+		self.logkvar_task = checkpoint['logkvar_task']
 		self.logls_task = checkpoint['logls_task']
 		self.Y_x = checkpoint['Y_x']
-		self.kvar_x = checkpoint['kvar_x']
+		self.logkvar_x = checkpoint['logkvar_x']
 		self.logls_x = checkpoint['logls_x']
 		self.Y_y = checkpoint['Y_y']
-		self.kvar_y = checkpoint['kvar_y']
+		self.logkvar_y = checkpoint['logkvar_y']
 		self.logls_y = checkpoint['logls_y']
 		self.Y_z = checkpoint['Y_z']
-		self.kvar_z = checkpoint['kvar_z']
+		self.logkvar_z = checkpoint['logkvar_z']
 		self.logls_z = checkpoint['logls_z']
 		self.Y_xrot = checkpoint['Y_xrot']
-		self.kvar_xrot = checkpoint['kvar_xrot']
+		self.logkvar_xrot = checkpoint['logkvar_xrot']
 		self.logls_xrot = checkpoint['logls_xrot']
 		self.Y_yrot = checkpoint['Y_yrot']
-		self.kvar_yrot = checkpoint['kvar_yrot']
+		self.logkvar_yrot = checkpoint['logkvar_yrot']
 		self.logls_yrot= checkpoint['logls_yrot']
 		self.Y_zrot = checkpoint['Y_zrot']
-		self.kvar_zrot = checkpoint['kvar_zrot']
+		self.logkvar_zrot = checkpoint['logkvar_zrot']
 		self.logls_zrot = checkpoint['logls_zrot']
 		self.mll_scale = checkpoint['mll_scale']
 		self.inducing_pts = checkpoint['inducing_pts']
@@ -506,8 +507,9 @@ class VAE(nn.Module):
 			#build GP for the regressor
 			xu = self.gp_params[regressors[i]]['xu']
 			yu = self.gp_params[regressors[i]]['y']
-			kvar = self.gp_params[regressors[i]]['kvar']
-			ls = (self.gp_params[regressors[i]]['log_ls']).exp() + 0.5
+			kvar = (self.gp_params[regressors[i]]['logkvar']).exp() + 0.1
+			sig = nn.Sigmoid()
+			ls = self.max_ls * sig((self.gp_params[regressors[i]]['log_ls']).exp() + 0.5)
 			gp_regressor = gp.GP(xu, yu, kvar, ls)
 			#get all xi's for regressor
 			#get prediction
@@ -531,7 +533,7 @@ class VAE(nn.Module):
 			plt.title('GP Plot {}_{}'.format(regressors[i], 'full_set'))
 			plt.xlabel('X')
 			plt.ylabel('Y')
-			#save plot & clean it ...
+			#save plot
 			plot_dir = os.path.join(save_dir, 'GP_plots')
 			if not os.path.exists(plot_dir):
 				os.makedirs(plot_dir)
