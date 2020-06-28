@@ -9,10 +9,10 @@ import argparse
 import numpy as np
 import random
 import torch
-#from torch.utils.data import Dataset, DataLoader
 import time
 import DataClass_GP as data #w/ FMRIDataClass, trsfm and loaders
 import vae_reg_GP as vae_reg
+import build_model_recons as recon
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')
 
@@ -20,8 +20,6 @@ parser.add_argument('--csv_file', type=str, metavar='N', default='/home/dfd4/fmr
 help='Full path to csv file with raw dset to used by DataClass and loaders. This is created by the pre_proc script.')
 parser.add_argument('--save_dir', type=str, metavar='N', default='', \
 help='Dir where model params, latent projection maps and recon files are saved to. Defaults to saving files in current dir.')
-parser.add_argument('--ref_nii', type=str, metavar='N', default='', \
-help='Full path to reference nii file to be used for reconstructions.') # did not implement default yet here
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', \
 help='Input batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',\
@@ -58,11 +56,14 @@ else:
 if __name__ == "__main__":
 	main_start = time.time()
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
+	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, mll_scale = args.mll_scale)
-	#uncomment if starting from pre-trained model state
-	#model.load_state(filename ='/hdd/dfd4/fmri_vae_out/GP_test_400/checkpoint_400.tar')
-	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
-	model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
-	model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
+	#uncomment if starting from pre-trained model
+	model.load_state(filename = '/hdd/dfd4/fmri_vae_out/GP_tests/GP_400_6_10_1e-4yvar/checkpoint_400.tar')
+	#model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
+	#model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
+	#model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
+	recon.mk_single_volumes(fMRI_data, model, args.csv_file, args.save_dir)
+	recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = False)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))
