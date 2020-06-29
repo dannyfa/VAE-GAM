@@ -1,7 +1,7 @@
 """
 Wrapper to call in data class, loaders and vae_reg model
 ToDo:
--- add loading saved ckpoint as a subroutine
+-- add loading ckpoint state as a user-specified subroutine
 
 """
 import os, sys
@@ -59,10 +59,10 @@ if __name__ == "__main__":
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, mll_scale = args.mll_scale)
 	#uncomment if starting from pre-trained model
-	model.load_state(filename = '/hdd/dfd4/fmri_vae_out/GP_tests/GP_400_6_10_1e-4yvar/checkpoint_400.tar')
-	#model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
-	#model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
-	#model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
+	#model.load_state(filename = '/hdd/dfd4/fmri_vae_out/GP_tests/GP_400_6_10_1e-4yvar/checkpoint_400.tar')
+	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
+	model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
+	model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
 	recon.mk_single_volumes(fMRI_data, model, args.csv_file, args.save_dir)
 	recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = False)
 	main_end = time.time()

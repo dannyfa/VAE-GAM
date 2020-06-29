@@ -1,10 +1,8 @@
 """
 Script defining fMRIDataset Class and loaders to be used
-Modf March 2020
--- Added convolved task var and motion vars
 
 ToDos
-Add proper train/test split and better random shuffling here
+Add proper train/test split and better random shuffling here...
 """
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -78,7 +76,7 @@ class ToTensor(object):
     def __call__(self, sample):
         subjid, volume, vol_num = sample['subjid'], sample['volume'], sample['vol_num']
         #Concat task w/ mot params by row
-        #added vol_num here for GP piece 
+        #added vol_num here for GP piece
         covars = np.array([sample['task'], sample['trans_x'], sample['trans_y'], sample['trans_z'], \
         sample['rot_x'], sample['rot_y'], sample['rot_z']], dtype=np.float64)
         return{'covariates':torch.from_numpy(covars).float(),

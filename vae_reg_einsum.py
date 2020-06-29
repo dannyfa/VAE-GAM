@@ -8,8 +8,8 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 To Do's
 - Fix frontal lobe noise picked up in task contrast map ***
 - Make any needed adaptations for HCP dataset
-- Improve code
 - Add time dependent latent space plotting
+- Shrink code a bit (where possible)
 """
 
 import matplotlib.pyplot as plt
