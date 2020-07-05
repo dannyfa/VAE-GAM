@@ -1,15 +1,21 @@
 """
 Short script to add a control signal to original pre_processed data.
 
-Control signals can be of 2 types:
-1) Simple: 4 small spheres added to frontal lobe.
-2) Challenging: a number -- in this case '3' added to frontal lobe
+Control signals can be of 2 shapes:
+1)4 small spheres added to frontal lobe.
+2)A number -- in this case '3' added to frontal lobe.
+
+These can be either convolved w/ HRF (as per usual) OR
+Have a different (more challenging) link function.
+Challenge link functions are of 2 types;
+1) Linear w/ a saturation (linear_sat)
+2) Inverted-V (inverted_delta)
+
+Block-design chosen was opposite to one seen for real effect in V1 for all link functions AND shapes added.
 
 DOES NOT overwrite original data -- instead, it writes output to same subdir as original.
-Suffix 'altered', type of signal, signal magnitude and a time-stamp are added to output name to mark this operation.
-
-Artifitial signal time series is first convolved with HRF prior to adding to volume time series
-Block-design chosen was opposite to one seen for real effect in V1.
+Suffix 'altered', shape of signal, signal magnitude, link_function
+and a time-stamp are added to output name to mark this operation.
 
 """
 import os, sys
@@ -34,14 +40,16 @@ parser = argparse.ArgumentParser(description='user args for adding control signa
 
 parser.add_argument('--root_dir', type=str, metavar='N', default='', \
 help='Root dir where original .nii and .tsv files are located')
-parser.add_argument('--intensity', type=float, metavar='N', default=500, \
-help='Abs value of spherical signals added to data.')
-parser.add_argument('--type', type=str, metavar='N', default='simple', \
-help='Type of control signal added. Simple refers to spheres.')
+parser.add_argument('--intensity', type=float, metavar='N', default=600, \
+help='Max abs value of signals added to data.')
+parser.add_argument('--shape', type=str, metavar='N', default='simple', \
+help='Shape of signal added. Simple refers to spheres. Any other str will yield a 7x7 hand-written 3.')
 parser.add_argument('--radius', type=int, metavar='N', default=1, \
 help='Radius of spheres to be added.Only used if type == simple')
 parser.add_argument('--size', type=int, metavar='N', default=7, \
 help='Dim of 3D array containing spherical masks. This is an A*A*A cube. Only used if type == simple')
+parser.add_argument('--link_function', type=str, metavar='N', default='normal_hrf', \
+help='Link function for added signal time series. Can be either normal_hrf, linear_sat or inverted_delta.')
 
 args = parser.parse_args()
 
@@ -52,8 +60,13 @@ else:
         print('Root dir given does not exist!')
         sys.exit()
 
-#define helper functions
+#make sure link_function is one of 3 allowed options
+if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta']:
+    print('Link function given is NOT supported.')
+    print('Please choose between normal_hrf, linear_sat OR inv_delta')
+    sys.exit()
 
+#define helper functions
 def mk_spherical_mask(size, radius):
     '''
     Args:
@@ -106,6 +119,33 @@ def stimulus_to_neural(vol_times):
         res.append(task)
     return(np.array(res))
 
+#creates a series with lenear increase up to 7th item
+#f/b flattening (saturation)
+def sat_link(times):
+    out = []
+    for t in times:
+        if 0<=t<=6:
+            res = (1/7)*(t)
+            out.append(res)
+        else:
+            res = 1.0
+            out.append(res)
+    return out
+
+#creates an inverted V-shaped time series
+#assumes total of 14 pts in time series
+#might need to be adjusted for other task block lengths
+def inv_delta(times):
+    out = []
+    for t in times:
+        if 0<=t<=6:
+            res = (1/6)*(t)
+            out.append(res)
+        else:
+            res = 1.0 - ((1/7)*(t-6))
+            out.append(res)
+    return(out)
+
 #get subjIDs
 #excluded sub-A00058952 due to high voxel intensity vals
 #this subj had loads of movement!!!
@@ -129,7 +169,7 @@ for i in range(len(subjs)):
 #these are dims for checker dset
 IMG_SHAPE = (41, 49, 35, 98)
 
-if args.type == 'simple':
+if args.shape == 'simple':
     #create small sphere w/ desired intensity
     sphere = mk_spherical_mask(size=args.size, radius=args.radius)
     spherical_mask = args.intensity * sphere
@@ -159,33 +199,60 @@ else:
             else:
                 pass
     #get just one of these nmbers, say '3'
-    three = imgs[1].resize((13, 13)) #resize it
+    three = imgs[1].resize((7, 7)) #resize it to 7x7.
     three = np.asarray(three)
     norm_three = three/255 #scale
     sig_three = args.intensity*norm_three #multiply by signal intensity
     rot_sig = ndimage.rotate(sig_three, -90) #this is needed given struct of fmri arr
-    signal = np.broadcast_to(rot_sig, (10, 13, 13)) #broadcast to desired shape
+    signal = np.broadcast_to(rot_sig, (10, 7, 7)) #broadcast to desired shape
     #create empty arr to hold control signal
     control_sig = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
-    control_sig[15:25, 34:47, 9:22]+= signal
+    control_sig[15:25, 34:41, 9:16]+= signal
 
-#now get time series convolution
+#now get time-series using link function
 #TR and 0-20 range established based on acquisition & task design params for checker dset
-TR=1.4
-vols = IMG_SHAPE[3]
-tr_times = np.arange(0, 20, TR)
-hrf_at_trs = hrf(tr_times)
-vol_times = np.arange(1, vols +1) * TR
-neural = stimulus_to_neural(vol_times)
-#convolve neural stim box-car series w/ HRF
-#take out last value to make arr lengths match
-convolved = np.convolve(neural, hrf_at_trs)
-n_to_remove = len(hrf_at_trs) - 1
-convolved = convolved[:-n_to_remove]
+if args.link_function == 'normal_hrf':
+    TR=1.4
+    vols = IMG_SHAPE[3]
+    tr_times = np.arange(0, 20, TR)
+    hrf_at_trs = hrf(tr_times)
+    vol_times = np.arange(1, vols +1) * TR
+    neural = stimulus_to_neural(vol_times)
+    #convolve neural stim box-car series w/ HRF
+    #take out last value to make arr lengths match
+    time_series = np.convolve(neural, hrf_at_trs)
+    n_to_remove = len(hrf_at_trs) - 1
+    time_series = time_series[:-n_to_remove]
+elif args.link_function == 'linear_sat':
+    #build lin sat series for each task block
+    task_times = np.arange(0, 14, 1)
+    lin_sat_block = sat_link(task_times)
+    #now build entire series w/ blocks of lin sat task effect
+    #and blocks w/ out it
+    #order of blocks is opposite of V1 effect in original
+    time_series = np.zeros(98)
+    time_series[0:14] += lin_sat_block
+    time_series[28:42]+= lin_sat_block
+    time_series[57:71]+= lin_sat_block
+    time_series[83:97]+= lin_sat_block
+else:
+    #i.e., if link function is inverted_delta
+    #build inverted delta series for each task block
+    task_times = np.arange(0, 14, 1)
+    inv_delta_block = inv_delta(task_times)
+    #now build entire series w/ blocks w/ task effect
+    #and blocks w/ out it
+    #order of blocks is opposite of V1 effect in original
+    time_series = np.zeros(98)
+    time_series[0:14] += inv_delta_block
+    time_series[28:42]+= inv_delta_block
+    time_series[57:71]+= inv_delta_block
+    time_series[83:97]+= inv_delta_block
 
-#get date
+#get date & intensity in str form
 ts = datetime.datetime.now().date()
 intensity_as_str = str(int(args.intensity))
+
 #loop through subjs and create altered dataset
 for i in range(len(subjs)):
     original_path = raw_data_files[i]
@@ -193,16 +260,16 @@ for i in range(len(subjs)):
     orig = np.array(orig_nii.dataobj)
     altered_data = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2], IMG_SHAPE[3]))
     #loop though vols
-    #convolve them with hrf
+    #apply link function
     #and add to original
     for j in range(orig.shape[3]):
         vol = orig[:, :, :, j]
-        conv_signal = control_sig*convolved[j]
-        vol += conv_signal
+        added_signal = control_sig*time_series[j]
+        vol += added_signal
         altered_data[:, :, :, j] = vol
-    #save alt subj dataset to diff path under same subdir
-    #'_ALTERED_' suffix , control type, signal intensity and date are added to output fname
-    alt_path = original_path.rstrip('.nii.gz') +'_ALTERED_' + args.type + '_' + intensity_as_str + \
-    '_' + ts.strftime('%m_%d_%Y') + '.nii.gz'
+    #save altered subj dataset to different path under same subdir
+    #'_ALTERED_' suffix , control shape, signal intensity, link_function and date are added to output fname
+    alt_path = original_path.rstrip('.nii.gz') +'_ALTERED_' + args.shape + '_' + intensity_as_str + \
+    '_' + args.link_function + '_' + ts.strftime('%m_%d_%Y') + '.nii.gz'
     alt_nii = nib.Nifti1Image(altered_data, orig_nii.affine, orig_nii.header)
     nib.save(alt_nii, alt_path)

@@ -41,6 +41,10 @@ parser.add_argument('--num_inducing_pts', type=int, metavar='N', default=6, \
 help='Number of inducing points for regressor GPs.')
 parser.add_argument('--mll_scale', type=float, metavar='N', default=2.0, \
 help='Scaling factor for marginal likelihood loss of GPs.')
+#adding param for l1 regularization scale
+#might become a hyperparam if this prooves to be useful
+parser.add_argument('--l1_scale', type=float, metavar='N', default=1.0, \
+help='Scaling factor for task map L1 regularization term.')
 
 args = parser.parse_args()
 torch.manual_seed(args.seed)
@@ -57,7 +61,8 @@ if __name__ == "__main__":
 	main_start = time.time()
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
-	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, mll_scale = args.mll_scale)
+	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, \
+	mll_scale = args.mll_scale, l1_scale=args.l1_scale)
 	#uncomment if starting from pre-trained model
 	#model.load_state(filename = '/hdd/dfd4/fmri_vae_out/GP_tests/GP_400_6_10_1e-4yvar/checkpoint_400.tar')
 	model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq, save_freq = args.save_freq, save_dir=args.save_dir)
