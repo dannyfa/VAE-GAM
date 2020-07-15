@@ -40,10 +40,10 @@ parser = argparse.ArgumentParser(description='user args for adding control signa
 
 parser.add_argument('--root_dir', type=str, metavar='N', default='', \
 help='Root dir where original .nii and .tsv files are located')
-parser.add_argument('--intensity', type=float, metavar='N', default=600, \
+parser.add_argument('--intensity', type=float, metavar='N', default=800, \
 help='Max abs value of signals added to data.')
 parser.add_argument('--shape', type=str, metavar='N', default='simple', \
-help='Shape of signal added. Simple refers to spheres. Any other str will yield a 7x7 hand-written 3.')
+help='Shape of signal added. Simple refers to spheres. Any other str will yield a hand-written 3.')
 parser.add_argument('--radius', type=int, metavar='N', default=1, \
 help='Radius of spheres to be added.Only used if type == simple')
 parser.add_argument('--size', type=int, metavar='N', default=7, \
@@ -199,15 +199,22 @@ else:
             else:
                 pass
     #get just one of these nmbers, say '3'
-    three = imgs[1].resize((7, 7)) #resize it to 7x7.
+    #three = imgs[1].resize((7, 7)) #resize it to 7x7.
+    three = imgs[1].resize((13, 13)) #resize it to 13x13
     three = np.asarray(three)
     norm_three = three/255 #scale
     sig_three = args.intensity*norm_three #multiply by signal intensity
     rot_sig = ndimage.rotate(sig_three, -90) #this is needed given struct of fmri arr
-    signal = np.broadcast_to(rot_sig, (10, 7, 7)) #broadcast to desired shape
+    #signal = np.broadcast_to(rot_sig, (10, 7, 7)) #broadcast to desired shape
+    signal = np.broadcast_to(rot_sig, (10, 13, 13)) #broadcast to desired shape
     #create empty arr to hold control signal
     control_sig = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
-    control_sig[15:25, 34:41, 9:16]+= signal
+    #for small three (7x7)
+    #control_sig[15:25, 34:41, 9:16]+= signal
+    #for medium three (9x9)
+    #control_sig[15:25, 34:43, 9:18]+= signal
+    #for large three (13x13)
+    control_sig[15:25, 34:47, 9:22]+= signal
 
 #now get time-series using link function
 #TR and 0-20 range established based on acquisition & task design params for checker dset
