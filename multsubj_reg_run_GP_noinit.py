@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(description='user args for vae_reg model')
 parser.add_argument('--csv_file', type=str, metavar='N', default='', \
 help='Full path to csv file with raw dset to used by DataClass and loaders. This is created by the pre_proc script.')
 parser.add_argument('--save_dir', type=str, metavar='N', default='', \
-help='Dir where model params, latent projection maps and recon files are saved to. Defaults to saving files in current dir.')
+help='Dir where model params, latent projection maps, GP plots and recon files are saved to. Defaults to saving files in current dir.')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', \
 help='Input batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',\
@@ -34,7 +34,7 @@ help='split # for project latent method. This is # of frames in each dset.')
 #these are mostly useful for troubleshooting GP Training
 parser.add_argument('--num_inducing_pts', type=int, metavar='N', default=6, \
 help='Number of inducing points for regressor GPs.')
-parser.add_argument('--mll_scale', type=float, metavar='N', default=2.0, \
+parser.add_argument('--mll_scale', type=float, metavar='N', default=10.0, \
 help='Scaling factor for marginal likelihood loss of GPs.')
 parser.add_argument('--from_ckpt', type=bool, metavar='N', default=False, \
 help='Boolen indicating if training or reconstruction should be done using a pre-trained model.')

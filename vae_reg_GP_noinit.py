@@ -6,10 +6,10 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
 
 To Do's
-- Make any needed adaptations to run on HCP dset.
+- Mk model able to handle init and noinit versions.
+- Mk it flexible enough to automate transference to other dsets.
 - Add time dependent latent space plotting.
-- Shrink code a bit (where possible).
-- Add time series modeling
+- Add time series modeling.
 """
 
 import matplotlib.pyplot as plt
@@ -30,7 +30,7 @@ import umap
 import os
 import itertools
 from sklearn.decomposition import PCA
-import gp #module with GP class
+import gp
 import pandas as pd
 
 # maintained shape of original nn by downsampling data on preprocessing
@@ -38,7 +38,7 @@ IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", num_inducing_pts=10.0, mll_scale=2.0):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", num_inducing_pts=6, mll_scale=10.0):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
@@ -64,7 +64,7 @@ class VAE(nn.Module):
 		#self.task_init = torch.nn.Parameter(self.beta_init)
 		#init params for GPs
 		#these are Xus (not trainable), Yu's, lengthscale and kernel vars (trainable)
-		#pass these to a big dict -- gp_params
+		#pass these to a big dict -- i.e., gp_params
 		self.inducing_pts = num_inducing_pts
 		self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
 		self.max_ls = torch.as_tensor(7.0).to(self.device) #7 based on original runs/simulations. Seems ok value
@@ -135,7 +135,7 @@ class VAE(nn.Module):
 		self.logls_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
 		self.gp_params['zrot']['log_ls'] = self.logls_zrot
 		# init z_prior
-		# When init mean, cov_factor and cov_diag '.to(self.device)' piece is  NEEDED for vals to be  properly passed to CUDA...
+		# When init mean, cov_factor and cov_diag '.to(self.device)' piece is  NEEDED for vals to be  properly passed to CUDA.
 		mean = torch.zeros(self.num_latents).to(self.device)
 		cov_factor = torch.zeros(self.num_latents).unsqueeze(-1).to(self.device)
 		cov_diag = torch.ones(self.num_latents).to(self.device)
