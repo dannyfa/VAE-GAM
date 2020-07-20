@@ -11,7 +11,7 @@ import random
 import torch
 import time
 import DataClass_GP as data #w/ FMRIDataClass, trsfm and loaders
-import vae_reg_GP as vae_reg
+import vae_reg_GP_noinit as vae_reg
 import build_model_recons as recon
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')
