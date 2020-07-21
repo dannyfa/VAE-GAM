@@ -43,7 +43,7 @@ help='Root dir where original .nii and .tsv files are located')
 parser.add_argument('--intensity', type=float, metavar='N', default=800, \
 help='Max abs value of signals added to data.')
 parser.add_argument('--shape', type=str, metavar='N', default='simple', \
-help='Shape of signal added. Simple refers to spheres. Any other str will yield a hand-written 3.')
+help='Shape of signal added. Simple refers to spheres. Any other str will yield a hand-written 3 or 0.')
 parser.add_argument('--radius', type=int, metavar='N', default=1, \
 help='Radius of spheres to be added.Only used if type == simple')
 parser.add_argument('--size', type=int, metavar='N', default=7, \
@@ -190,21 +190,30 @@ else:
     #create small list w/ 2-3 numbers we might use
     imgs = []
     for i, sample in enumerate(mnist_trainset):
-        if i <=7:
+        if i <=10:
             target = sample[1]
             #get a 2 and a 3. WIll use 3 only for now...
-            if target == 2 or target ==3:
+            if target == 0 or target ==3:
                 img = sample[0]
                 imgs.append(img)
             else:
                 pass
-    #get just one of these nmbers, say '3'
+    #get just one of these numbers, say a '0'
+    #if using '3'
     #three = imgs[1].resize((7, 7)) #resize it to 7x7.
-    three = imgs[1].resize((13, 13)) #resize it to 13x13
-    three = np.asarray(three)
-    norm_three = three/255 #scale
-    sig_three = args.intensity*norm_three #multiply by signal intensity
-    rot_sig = ndimage.rotate(sig_three, -90) #this is needed given struct of fmri arr
+    #three = imgs[1].resize((13, 13)) #resize it to 13x13
+    #three = np.asarray(three)
+    #norm_three = three/255 #scale
+    #sig = args.intensity*norm_three #multiply by signal intensity
+
+    #if using '0'
+    #zero = imgs[0].resize((7, 7)) #resize it to 7x7.
+    zero = imgs[0].resize((13, 13)) #resize it to 13x13
+    zero = np.asarray(zero)
+    norm_zero = zero/255 #scale
+    sig = args.intensity*norm_zero #multiply by signal intensity
+
+    rot_sig = ndimage.rotate(sig, -90) #this is needed given struct of fmri arr
     #signal = np.broadcast_to(rot_sig, (10, 7, 7)) #broadcast to desired shape
     signal = np.broadcast_to(rot_sig, (10, 13, 13)) #broadcast to desired shape
     #create empty arr to hold control signal
@@ -214,7 +223,9 @@ else:
     #for medium three (9x9)
     #control_sig[15:25, 34:43, 9:18]+= signal
     #for large three (13x13)
-    control_sig[15:25, 34:47, 9:22]+= signal
+    #control_sig[15:25, 34:47, 9:22]+= signal
+    #for large zero (13x13)
+    control_sig[15:25, 34:47, 8:21]+= signal
 
 #now get time-series using link function
 #TR and 0-20 range established based on acquisition & task design params for checker dset
