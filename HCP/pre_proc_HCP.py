@@ -13,7 +13,7 @@ Major changes:
 ToDo's:
 - Make TR user inputs
 - Make StimToNeural more flexible -- i.e., able to read timings from a text file for each subj
-- Make finding needed nifti and tsv files less hard-coded
+- Make finding needed files more flexible
 
 """
 import os, sys
