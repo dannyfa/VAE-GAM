@@ -369,6 +369,7 @@ class VAE(nn.Module):
 		state['beta_init'] = self.beta_init
 		state['l1_scale'] = self.l1_scale
 		#add GP nn params to checkpt files
+		#this includes gp_params dict 
 		state['Y_task'] = self.Y_task
 		state['logkvar_task'] = self.logkvar_task
 		state['logls_task'] = self.logls_task
@@ -390,6 +391,7 @@ class VAE(nn.Module):
 		state['Y_zrot'] = self.Y_zrot
 		state['logkvar_zrot'] = self.logkvar_zrot
 		state['logls_zrot'] = self.logls_zrot
+		state['gp_params'] = self.gp_params
 		state['mll_scale'] = self.mll_scale
 		state['inducing_pts'] = self.inducing_pts
 		filename = os.path.join(self.save_dir, filename)
@@ -410,6 +412,7 @@ class VAE(nn.Module):
 		self.task_init = checkpoint['task_init']
 		self.l1_scale = checkpoint['l1_scale']
 		#load in GP params from ckpt files
+		#and load gp_params dict - needed here (otherwise only initial values are plotted!)
 		self.Y_task = checkpoint['Y_task']
 		self.logkvar_task = checkpoint['logkvar_task']
 		self.logls_task = checkpoint['logls_task']
@@ -431,6 +434,7 @@ class VAE(nn.Module):
 		self.Y_zrot = checkpoint['Y_zrot']
 		self.logkvar_zrot = checkpoint['logkvar_zrot']
 		self.logls_zrot = checkpoint['logls_zrot']
+		self.gp_params = checkpoint['gp_params']
 		self.mll_scale = checkpoint['mll_scale']
 		self.inducing_pts = checkpoint['inducing_pts']
 
