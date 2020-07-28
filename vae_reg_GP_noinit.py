@@ -442,7 +442,7 @@ class VAE(nn.Module):
 		# plotting only test set since this is un-shuffled.
 		# Will plot by subjid in future to overcome this limitation
 		# Collect latent means.
-		filename = 'temp.pdf'
+		filename = str(self.epoch).zfill(3) + '_temp.pdf'
 		file_path = os.path.join(save_dir, filename)
 		latent = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
 		with torch.no_grad():
@@ -548,7 +548,8 @@ class VAE(nn.Module):
 			plt.xlabel('X')
 			plt.ylabel('Y')
 			#save plot
-			plot_dir = os.path.join(save_dir, 'GP_plots')
+			dir_name = str(self.epoch).zfill(3) + '_GP_plots'
+			plot_dir = os.path.join(save_dir, dir_name)
 			if not os.path.exists(plot_dir):
 				os.makedirs(plot_dir)
 			filename = 'GP_{}_{}.pdf'.format(regressors[i], 'full_set')
