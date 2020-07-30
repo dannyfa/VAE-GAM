@@ -1,19 +1,39 @@
+"""
+Script to create global and subj specific avgs maps for:
+1) Task
+2) noTask
+3) contrast = task - notask
+
+TODOs:
+1. Get rid of need for a reference nifti file arg
+2. Add small method to avoid using multiple lines when saving files
+
+These were already done for newer scripts, adapt implementation from there.
+"""
+
 import os
 import numpy as np
 import nibabel as nib
 import pandas as pd
-import DataClass as data
+import DataClass_GP as data
+import argparse
 
-#set up paths to data, ref_nii and saving dir
-csv_file = '/home/dfd4/fmri_vae/new_preproc_dset/preproc_dset.csv'
-ref_nii = '/home/rachaelwright/fmri_sample_data/checkerboard_and_breathhold/sub-A00057808/ses-NFB2/func/wrsub-A00057808_ses-NFB2_task-CHECKERBOARD_acq-1400_bold.nii'
-save_dir = '/home/dfd4/fmri_vae/new_preproc_dset/manual_avgs'
+parser = argparse.ArgumentParser(description='args for creating avg task, notask and contrast maps.')
 
-data = data.FMRIDataset(csv_file = csv_file) # no need to make it into tensor
+parser.add_argument('--csv_file', type=str, metavar='N', default='', \
+help='Full path to csv file with raw dset. This is created by the pre_proc script.')
+parser.add_argument('--save_dir', type=str, metavar='N', default='', \
+help='Dir where outputs (avg task, notask and contrast maps) are saved.')
+parser.add_argument('--ref_nii', type=str, default='', metavar='N', \
+help='Path to a reference nifti. This is needed to save maps created in nifti format.')
+
+args = parser.parse_args()
+
+data = data.FMRIDataset(csv_file = args.csv_file) # no need to make it into tensor
 #getting subj ids and ref nii
-dset = pd.read_csv(csv_file)
+dset = pd.read_csv(args.csv_file)
 subjs = dset.subjid.unique().tolist()
-input_nifti = nib.load(ref_nii)
+input_nifti = nib.load(args.ref_nii)
 
 #Calculating grand-avg maps and cons
 all_task_vols = []
@@ -38,11 +58,11 @@ cons = task_avg - notask_avg
 avg_task_nii = nib.Nifti1Image(task_avg, input_nifti.affine, input_nifti.header)
 avg_notask_nii = nib.Nifti1Image(notask_avg, input_nifti.affine, input_nifti.header)
 cons = nib.Nifti1Image(cons, input_nifti.affine, input_nifti.header)
-filepath_avgtask = os.path.join(save_dir, 'grand_task_avg.nii')
+filepath_avgtask = os.path.join(args.save_dir, 'grand_task_avg.nii')
 nib.save(avg_task_nii, filepath_avgtask)
-filepath_avgnotask = os.path.join(save_dir, 'grand_notask_avg.nii')
+filepath_avgnotask = os.path.join(args.save_dir, 'grand_notask_avg.nii')
 nib.save(avg_notask_nii, filepath_avgnotask)
-filepath_cons = os.path.join(save_dir, 'contrast.nii')
+filepath_cons = os.path.join(args.save_dir, 'contrast.nii')
 nib.save(cons, filepath_cons)
 
 #Calculating subj task avg maps
@@ -69,9 +89,9 @@ for subj in subjs:
     subj_taskavg_nii = nib.Nifti1Image(subj_taskavg, input_nifti.affine, input_nifti.header)
     subj_notaskavg_nii = nib.Nifti1Image(subj_notaskavg, input_nifti.affine, input_nifti.header)
     subj_cons_nii = nib.Nifti1Image(subj_cons, input_nifti.affine, input_nifti.header)
-    filepath_subj_taskavg = os.path.join(save_dir, '{}_taskavg.nii'.format(subj))
+    filepath_subj_taskavg = os.path.join(args.save_dir, '{}_taskavg.nii'.format(subj))
     nib.save(subj_taskavg_nii, filepath_subj_taskavg)
-    filepath_subj_notaskavg = os.path.join(save_dir, '{}_notaskavg.nii'.format(subj))
+    filepath_subj_notaskavg = os.path.join(args.save_dir, '{}_notaskavg.nii'.format(subj))
     nib.save(subj_notaskavg_nii, filepath_subj_notaskavg)
-    filepath_subj_cons= os.path.join(save_dir, '{}_contrast.nii'.format(subj))
+    filepath_subj_cons= os.path.join(args.save_dir, '{}_contrast.nii'.format(subj))
     nib.save(subj_cons_nii, filepath_subj_cons)
