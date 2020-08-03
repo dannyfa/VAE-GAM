@@ -8,7 +8,7 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 To Do's
 - Mk model able to handle init and noinit versions.
 - Mk it flexible enough to automate transference to other dsets.
-- Add time dependent latent space plotting. And improve overall visual quality of this plot ... 
+- Add time dependent latent space plotting. And improve overall visual quality of this plot ...
 - Add time series modeling.
 """
 
@@ -280,15 +280,19 @@ class VAE(nn.Module):
 			gp_loss += gp_mll
 			#add residual prediction from GP to task variable
 			task_var = covariates[:, i-1] + y_q
-			# use this to scale effect map
+			#use this to scale effect map
 			#using EinSum to preserve batch dim
 			cons = torch.einsum('b,bx->bx', task_var, diff)
 			#add cons to init_task param if covariate == 'task'
 			#implementation below was adopted to avoid in place ops that would cause autograd errors
 			if i==1:
 				cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
-				l1_loss = torch.nn.L1Loss()
-				l1_reg += l1_loss(cons, self.beta_init.unsqueeze(0).view(1,-1).expand(ids.shape[0], -1))
+				#uncomment if doing l1 reg on beta init map itself
+				#l1_loss = torch.nn.L1Loss()
+				#l1_reg += l1_loss(cons, self.beta_init.unsqueeze(0).view(1,-1).expand(ids.shape[0], -1))
+				#if forcing sparsity on betas themselves ...
+				l1_loss = torch.norm(cons, p=1)
+				l1_reg += l1_loss
 			x_rec = x_rec + cons
 			imgs[imgs_keys[i]] = cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
@@ -305,13 +309,13 @@ class VAE(nn.Module):
 		#contract all values using torch.mean()
 		elbo = torch.mean(elbo, dim=0)
 		#adding GP losses to VAE loss
-		#scalling factor is a hyperparam
 		tot_loss = -elbo + self.mll_scale*(-gp_loss) + self.l1_scale*(l1_reg)
 		if return_latent_rec:
 			return tot_loss, z.detach().cpu().numpy(), imgs
 		return tot_loss
 
-    #commented autograd.detect.anomaly() line  was used to trace out nan loss issue
+    #on train method below, I commented autograd.detect.anomaly() line
+	#which was used to trace out nan loss issue
 	#only use this if trying to trace issues with auto-grad
 	#otherwise, it will significantly slow code execution!
 
