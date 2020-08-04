@@ -11,7 +11,7 @@ import random
 import torch
 import time
 import DataClass_GP as data
-import vae_reg_GP as vae_reg
+import vae_reg_Laplace as vae_reg
 import build_model_recons as recon
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')

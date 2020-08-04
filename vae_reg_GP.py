@@ -4,12 +4,14 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added motion regressors in 6 degrees of freedom (from fmriprep)
 - Added 1D GPs to model regressors (task + 6 motion params)
 - Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
+- Added L1 regularization to all covariate maps. This helps correcting spurious signals.
 
 To Do's
+- Consider other 'cheaper' init options.
 - Mk model able to handle init and noinit versions.
+- Add sMC for time series modeling.
+- Add time dependent latent space plotting. And improve overall visual quality of LS plot ...
 - Mk it flexible enough to automate transference to other dsets.
-- Add time dependent latent space plotting. And improve overall visual quality of this plot ...
-- Add time series modeling.
 """
 
 import matplotlib.pyplot as plt
@@ -287,17 +289,13 @@ class VAE(nn.Module):
 			#implementation below was adopted to avoid in place ops that would cause autograd errors
 			if i==1:
 				cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
-				#uncomment if doing l1 reg on beta init map itself
-				#l1_loss = torch.nn.L1Loss()
-				#l1_reg += l1_loss(cons, self.beta_init.unsqueeze(0).view(1,-1).expand(ids.shape[0], -1))
-				#if forcing sparsity on betas themselves ...
-				l1_loss = torch.norm(cons, p=1)
-				l1_reg += l1_loss
+			# am forcing l1 regularization on all maps (including motion ones)
+			l1_loss = torch.norm(cons, p=1)
+			l1_reg += l1_loss
 			x_rec = x_rec + cons
 			imgs[imgs_keys[i]] = cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
 		# calculating loss for VAE ...
-		# This version uses torch.distributions modules only
 		elbo = -kl.kl_divergence(latent_dist, self.z_prior) #shape = batch_dim
 		#obs_dist.shape = batch_dim, img_dim
 		obs_dist = Normal(x_rec.float(),\
