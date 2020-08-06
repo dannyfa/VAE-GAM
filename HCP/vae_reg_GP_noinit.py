@@ -3,12 +3,13 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added single voxel noise modeling (epsilon param)
 - Added motion regressors in 6 degrees of freedom (from fmriprep)
 - Added 1D GPs to model regressors (task + 6 motion params)
-- Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
+- Added L1 regularization to all covariate maps. This helps correcting spurious signals.
 
 To Do's
-- Mk code more flexbile for different dsets...
-- Add time dependent latent space plotting.
-- Add time series modeling.
+- Mk model able to handle init and noinit versions.
+- Add sMC for time series modeling.
+- Add time dependent latent space plotting. And improve overall visual quality of LS plot ...
+- Mk it flexible enough to automate transference to other dsets.
 """
 
 import matplotlib.pyplot as plt
@@ -37,7 +38,7 @@ IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", num_inducing_pts=6, mll_scale=10.0):
+	def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", num_inducing_pts=6, mll_scale=10.0, l1_scale=1.0):
 		super(VAE, self).__init__()
 		self.nf = nf
 		self.save_dir = save_dir
@@ -46,7 +47,7 @@ class VAE(nn.Module):
 		self.num_latents = num_latents
 		self.z_dim = self.num_latents + self.num_covariates + 1
 		#adding l1_scale for regularization term
-		#self.l1_scale = l1_scale
+		self.l1_scale = l1_scale
 		assert device_name != "cuda" or torch.cuda.is_available()
 		if device_name == "auto":
 			device_name = "cuda" if torch.cuda.is_available() else "cpu"
@@ -236,7 +237,7 @@ class VAE(nn.Module):
 		#computed mlls will be added to it and passed on to overall batch_loss along w/ VAE loss
 		gp_loss = 0
 		#set L1 regularization term to zero
-		#l1_reg = 0
+		l1_reg = 0
 		#getting z's using encoder
 		mu, u, d = self.encode(x)
 		#check if d is not too small
@@ -286,8 +287,8 @@ class VAE(nn.Module):
 			#implementation below was adopted to avoid in place ops that would cause autograd errors
 			#if i==1:
 			#	cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
-			#	l1_loss = torch.nn.L1Loss()
-			#	l1_reg += l1_loss(cons, self.beta_init.unsqueeze(0).view(1,-1).expand(ids.shape[0], -1))
+			l1_loss = torch.norm(cons, p=1)
+			l1_reg += l1_loss
 			x_rec = x_rec + cons
 			imgs[imgs_keys[i]] = cons.detach().cpu().numpy()
 		imgs['full_rec']=x_rec.detach().cpu().numpy()
@@ -305,7 +306,7 @@ class VAE(nn.Module):
 		elbo = torch.mean(elbo, dim=0)
 		#adding GP losses to VAE loss
 		#scalling factor is a hyperparam
-		tot_loss = -elbo + self.mll_scale*(-gp_loss)
+		tot_loss = -elbo + self.mll_scale*(-gp_loss) + self.l1_scale*(l1_reg)
 		if return_latent_rec:
 			return tot_loss, z.detach().cpu().numpy(), imgs
 		return tot_loss
@@ -366,7 +367,7 @@ class VAE(nn.Module):
 		state['epsilon'] = self.epsilon
 		#state['task_init'] = self.task_init
 		#state['beta_init'] = self.beta_init
-		#state['l1_scale'] = self.l1_scale
+		state['l1_scale'] = self.l1_scale
 		#add GP nn params to checkpt files
 		state['Y_task'] = self.Y_task
 		state['logkvar_task'] = self.logkvar_task
@@ -408,7 +409,7 @@ class VAE(nn.Module):
 		self.epsilon = checkpoint['epsilon']
 		#self.beta_init = checkpoint['beta_init']
 		#self.task_init = checkpoint['task_init']
-		#self.l1_scale = checkpoint['l1_scale']
+		self.l1_scale = checkpoint['l1_scale']
 		#load in GP params from ckpt files
 		self.Y_task = checkpoint['Y_task']
 		self.logkvar_task = checkpoint['logkvar_task']
