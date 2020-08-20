@@ -541,10 +541,12 @@ class VAE(nn.Module):
 			#create plot and save it
 			plt.clf()
 			plt.scatter(x_u, y_u, c='k', label='inducing points')
-			plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
+			plt.plot(x_q, y_q, c='slateblue', alpha=0.6, label='posterior mean')
 			two_sigma = 2*np.sqrt(y_var)
-			kwargs = {'color':'b', 'alpha':0.2, 'label':'2 sigma'}
+			kwargs = {'color':'slateblue', 'alpha':0.2, 'label':'2 sigma'}
 			plt.fill_between(x_q, y_q-two_sigma, y_q+two_sigma, **kwargs)
+			plt.locator_params(axis='x', nbins = 6)
+			plt.locator_params(axis='y', nbins = 4)
 			plt.legend(loc='best')
 			plt.title('GP Plot {}_{}'.format(regressors[i], 'full_set'))
 			plt.xlabel('X')
