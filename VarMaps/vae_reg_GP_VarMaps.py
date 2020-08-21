@@ -230,7 +230,8 @@ class VAE(nn.Module):
 		h = F.relu(self.convt3(self.bnt3(h)))
 		h = F.relu(self.convt4(h))
 		mu_map = torch.sigmoid(self.convt51(self.bnt51(h)).squeeze(1).view(-1,IMG_DIM))
-		var_map = torch.sigmoid(self.convt52(self.bnt52(h)).squeeze(1).view(-1,IMG_DIM))
+		#testing changing sigmoid for simple exp here since vars has to be +
+		var_map = torch.exp(self.convt52(self.bnt52(h)).squeeze(1).view(-1,IMG_DIM))
 		return mu_map, var_map
 
 
@@ -313,7 +314,7 @@ class VAE(nn.Module):
 		#obs_dist.shape = batch_dim, img_dim
 		#calc tot variance
 		#exp here to guarantee all vals are positive ...
-		tot_var = torch.exp(x_rec_var.float()) + \
+		tot_var = x_rec_var.float() + \
 		torch.exp(-self.epsilon.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1).float())
 		obs_dist = Normal(x_rec_mean.float(),\
 		torch.sqrt(tot_var))
