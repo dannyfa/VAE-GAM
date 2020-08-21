@@ -230,8 +230,7 @@ class VAE(nn.Module):
 		h = F.relu(self.convt3(self.bnt3(h)))
 		h = F.relu(self.convt4(h))
 		mu_map = torch.sigmoid(self.convt51(self.bnt51(h)).squeeze(1).view(-1,IMG_DIM))
-		#testing changing sigmoid for simple exp here since vars has to be +
-		var_map = torch.exp(self.convt52(self.bnt52(h)).squeeze(1).view(-1,IMG_DIM))
+		var_map = torch.sigmoid(self.convt52(self.bnt52(h)).squeeze(1).view(-1,IMG_DIM))
 		return mu_map, var_map
 
 
@@ -292,7 +291,10 @@ class VAE(nn.Module):
 			task_var = covariates[:, i-1] + y_q
 			#use this to scale effect map
 			cons = torch.einsum('b,bx->bx', task_var, diff)
-			cons_var = torch.einsum('b,bx->bx', y_vars, diff_var)
+			#taking away GP yvar scaling from variance maps ..
+			#unsure if this is the main issue BUT will test it out
+			#cons_var = torch.einsum('b,bx->bx', y_vars, diff_var)
+			cons_var = diff_var
 			#add cons to init_task param if covariate == 'task'
 			#implementation below was adopted to avoid in place ops that would cause autograd errors
 			if i==1:
@@ -314,7 +316,7 @@ class VAE(nn.Module):
 		#obs_dist.shape = batch_dim, img_dim
 		#calc tot variance
 		#exp here to guarantee all vals are positive ...
-		tot_var = x_rec_var.float() + \
+		tot_var = torch.exp(x_rec_var.float()) + \
 		torch.exp(-self.epsilon.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1).float())
 		obs_dist = Normal(x_rec_mean.float(),\
 		torch.sqrt(tot_var))
