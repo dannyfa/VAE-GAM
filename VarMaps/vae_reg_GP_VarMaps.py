@@ -291,19 +291,15 @@ class VAE(nn.Module):
 			task_var = covariates[:, i-1] + y_q
 			#use this to scale effect map
 			cons = torch.einsum('b,bx->bx', task_var, diff)
-			#taking away GP yvar scaling from variance maps ..
-			#unsure if this is the main issue BUT will test it out
-			#cons_var = torch.einsum('b,bx->bx', y_vars, diff_var)
-			cons_var = diff_var
+			cons_var = torch.einsum('b,bx->bx', y_vars, diff_var)
 			#add cons to init_task param if covariate == 'task'
 			#implementation below was adopted to avoid in place ops that would cause autograd errors
 			if i==1:
 				cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
 				#adding init only to mean map. To me this is reasonable!
-			#am forcing l1 regularization on all maps (including motion ones)
-			#this includes BOTH mean and variance maps
-			#is this ok??
-			l1_loss = torch.norm(cons, p=1) + torch.norm(cons_var, p=1)
+			#making l1 regulatization applicable only to mean maps...
+			#another potential cause of problems in this version of model...
+			l1_loss = torch.norm(cons, p=1)
 			l1_reg += l1_loss
 			x_rec_mean = x_rec_mean + cons
 			x_rec_var = x_rec_var + cons_var
