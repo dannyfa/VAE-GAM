@@ -1,54 +1,93 @@
 """
-Short script to calculate contrast explained variance per subj
-This is done for task vols only
+Short script to calculate explained variance for each covariate.
 
-Tries to ans question of whether or not model should be able to pick up task effect
+This is done on a per subj basis.
 
-Feb 2020
+Requires that avg maps have been created for all covariates reported!
+Be sure to re-run reconstruction routines with mk_motion_maps = True if wanting
+to calculate explained variance for motion covariates as well.
+
+Tries to answer question of which covariates included are useful.
+
+Might also add global (i.e., across subjs) explained variance for each covariate (to be seen).
 """
 
-import os
+import os, sys
 import numpy as np
 import nibabel as nib
 import re
+import argparse
+import glob
 
-#pass on data dirs
-#will look for avg maps and single vol maps under these
-avg_dir = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recon_avgs'
-recon_dir = '/home/dfd4/fmri_vae/new_preproc_dset/1000epochs_HRFConv/model_recons'
+parser = argparse.ArgumentParser(description='user args')
+
+parser.add_argument('--analysis_dir', type=str, metavar='N', default='', \
+help='Path to analysis directory where model individual and avg reconstruction maps are stored.')
+
+args = parser.parse_args()
+
+#find reconstruction directories
+#if not found, output an error msg and exit
+recons_dir = os.path.join(args.analysis_dir, 'reconstructions')
+#if more than 1 sngl vol recon dir exists, pick one with highest epoch #
+sngl_vol_recons_dirs = glob.glob(recons_dir + '/' + '*_model_recons')[-1]
+if not os.path.exists(sngl_vol_recons_dirs):
+    print('No single volume reconstruction directory found!')
+    sys.exit()
+#if more than 1 avg recon dir exists, picks one with highest epoch #
+avg_vol_recons_dirs = glob.glob(recons_dir + '/' + '*_avg_model_recons')[-1]
+if not os.path.exists(avg_vol_recons_dirs):
+    print('No avg volume reconstruction directory found!')
+    sys.exit()
 
 #get subjIDs
-#getting subjs
 RE = re.compile('\Asub-A000*') #regex for finding subjIDs
-dirs = os.listdir(recon_dir)
+subj_dirs = os.listdir(sngl_vol_recons_dirs)
 subjs = []
-for i in range(len(dirs)):
-    if RE.search(dirs[i]):
-        subjs.append(dirs[i])
+for i in range(len(subj_dirs)):
+    if RE.search(subj_dirs[i]):
+        subjs.append(subj_dirs[i])
+
+maps = ['base', 'task', 'x_mot', 'y_mot', 'z_mot', 'pitch_mot', 'yaw_mot', 'roll_mot']
 
 for subj in subjs:
-    #get subj  avg recon map
-    frec_avg_path = os.path.join(avg_dir, '{}_task_frecavg.nii'.format(subj))
+    #get subj full reconstruction avg map
+    #this will be used to calc explained variance for all covariates
+    frec_avg_path = os.path.join(avg_vol_recons_dirs, subj, 'full_rec_avg.nii')
     frec_avg = np.array(nib.load(frec_avg_path).dataobj)
-    #init numerator and denominator
-    num, den = [], []
-    #get subj dir and sub vols dirs
-    subj_dir = os.path.join(recon_dir, subj)
-    subj_vol_dirs = os.listdir(subj_dir)
-    #now calc numerator and denominator
-    #task_vols = 0
-    for j in subj_vol_dirs:
-        if j[-1] == '1': #do this only for task vols
-            volcons_path, volfrec_path =  os.path.join(subj_dir, j, 'recon_task.nii'), os.path.join(subj_dir, j, 'recon_full_rec.nii')
-            volcons, volfrec = np.array(nib.load(volcons_path).dataobj), np.array(nib.load(volfrec_path).dataobj)
-            num.append(np.square(volcons).sum())
-            diff = frec_avg - volfrec
-            den.append(np.square(diff).sum())
-            #task_vols += 1
-        else:
+    print(20*'=')
+    print('Subj: {}'.format(subj))
+    for map in maps:
+        #get avg covariate map for subj
+        cov_avg_path = os.path.join(avg_vol_recons_dirs, subj, '{}_avg.nii'.format(map))
+        if not os.path.exists(cov_avg_path):
+            print('Avg map for covariate {} not found!'.format(map))
+            print('Will not report explained variance for {}'.format(map))
             pass
-    #now get means over num and den
-    num_avg = np.array(num).mean()
-    den_avg = np.array(den).sum()
-    subj_exp_var = num_avg/den_avg
-    print('Cons explained variance for subj {} is: {}'.format(subj, subj_exp_var))
+        else:
+            #proceed w/ calc for given covariate ...
+            cov_avg = np.array(nib.load(cov_avg_path).dataobj)
+            numerator, denominator = [], []
+            #get subj dir and sub vols dirs
+            subj_dir = os.path.join(sngl_vol_recons_dirs, subj)
+            subj_vol_dirs = os.listdir(subj_dir)
+            #now calc numerator and denominator
+            for j in subj_vol_dirs:
+                if j[-1] == '1':
+                    cov_path, frec_path =  os.path.join(subj_dir, j, 'recon_{}.nii'.format(map)), \
+                    os.path.join(subj_dir, j, 'recon_full_rec.nii')
+                    cov, frec = np.array(nib.load(cov_path).dataobj), \
+                    np.array(nib.load(frec_path).dataobj)
+                    num = np.square(cov - cov_avg).sum() #sum here is across voxels!
+                    numerator.append(num)
+                    den = np.square(frec - frec_avg).sum() #sum here is across voxels!
+                    denominator.append(den)
+                else:
+                    pass
+            # now calc subj explained variance for covariate
+            # dividivng through number of vols is actually NOT needed here
+            # sum is over total # of task volumes in this case
+            top = np.array(numerator).mean()
+            bottom = np.array(denominator).mean()
+            subj_cov_explained_vars =  top/bottom
+            print('Covariate {} variance ratio is: {:.2e}'.format(map, subj_cov_explained_vars))
