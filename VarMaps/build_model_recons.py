@@ -74,61 +74,55 @@ def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
     ref_niis = dset.nii_path.unique().tolist()
     subjs = dset.subjid.unique().tolist()
     #mk a list of regressors
-    maps = ['base', 'task', 'full_rec', 'x_mot', 'y_mot', \
+    maps = ['base', 'variance', 'task', 'full_rec', 'x_mot', 'y_mot', \
     'z_mot', 'pitch_mot', 'roll_mot', 'yaw_mot']
     if not mk_motion_maps:
-        maps = maps[0:3]
+        maps = maps[0:4]
     #create dict to hold grand avg maps
     gd_avg_maps = {}
     for l in maps:
-        gd_avg_maps[l] = {}
         #create name for null maps where task == 0
         null_map = 'null' + '_' + l
-        gd_avg_maps[null_map] = {}
-        for j in ('mu', 'sigma'):
-            gd_avg_maps[l][j] = np.zeros((41, 49, 35),np.float)
-            gd_avg_maps[null_map][j] = np.zeros((41, 49, 35),np.float)
-            #build single subj avg maps
-            for i in range(len(subjs)):
-                subj_sngl_vols_dir = os.path.join(sngl_vols_dir, subjs[i])
-                subj_vol_dirs = os.listdir(subj_sngl_vols_dir)
-                subj_avg_vols_dir = os.path.join(avg_vols_dir, subjs[i])
-                if not os.path.exists(subj_avg_vols_dir):
-                    os.makedirs(subj_avg_vols_dir)
-                #create dict for subj-level avg maps
-                subj_maps = {}
-                subj_maps[l] = {}
-                subj_maps[l][j] = np.zeros((41, 49, 35),np.float)
-                subj_maps[null_map] = {}
-                subj_maps[null_map][j] = np.zeros((41, 49, 35),np.float)
-                #init counter for task volumes
-                task_vols = 0
-                for k in subj_vol_dirs:
-                    vol_path = os.path.join(subj_sngl_vols_dir, k, 'recon_{}_{}.nii'.format(l, j))
-                    vol = np.array(nib.load(vol_path).dataobj)
-                    if k[-1] == '1':
-                        subj_maps[l][j] += vol
-                        task_vols += 1
-                    else:
-                        subj_maps[null_map][j] += vol
-                #compute subj avg for regressor
-                notask_vols = len(subj_vol_dirs)-task_vols
-                subj_maps[l][j] /=  task_vols
-                subj_maps[null_map][j] /= notask_vols
-                #save subj-level maps
-                _save_map(subj_maps[l][j], ref_niis[i], subj_avg_vols_dir, (l+'_'+j))
-                _save_map(subj_maps[null_map][j], ref_niis[i], subj_avg_vols_dir, (null_map+'_'+j))
-                #update gd avg maps
-                gd_avg_maps[l][j] += subj_maps[l][j]
-                gd_avg_maps[null_map][j] += subj_maps[null_map][j]
-            #calc grand avg maps
-            gd_avg_maps[l][j] /= len(subjs)
-            gd_avg_maps[null_map][j] /= len(subjs)
-            #save grand maps
-            #am using zeroth nifti file as Reference
-            #however, any file in list is ok since subjs are warped to common space
-            _save_map(gd_avg_maps[l][j], ref_niis[0], avg_vols_dir, (l + '_' + j))
-            _save_map(gd_avg_maps[null_map][j], ref_niis[0], avg_vols_dir, (null_map + '_' + j))
+        gd_avg_maps[l] = np.zeros((41, 49, 35),np.float)
+        gd_avg_maps[null_map]= np.zeros((41, 49, 35),np.float)
+        for i in range(len(subjs)):
+            subj_sngl_vols_dir = os.path.join(sngl_vols_dir, subjs[i])
+            subj_vol_dirs = os.listdir(subj_sngl_vols_dir)
+            subj_avg_vols_dir = os.path.join(avg_vols_dir, subjs[i])
+            if not os.path.exists(subj_avg_vols_dir):
+                os.makedirs(subj_avg_vols_dir)
+            subj_maps = {}
+            subj_maps[l] = np.zeros((41, 49, 35),np.float)
+            subj_maps[null_map] = np.zeros((41, 49, 35),np.float)
+            #init counter for task volumes
+            task_vols = 0
+            for k in subj_vol_dirs:
+                vol_path = os.path.join(subj_sngl_vols_dir, k, 'recon_{}.nii'.format(l))
+                vol = np.array(nib.load(vol_path).dataobj)
+                if k[-1] == '1':
+                    subj_maps[l]+= vol
+                    task_vols += 1
+                else:
+                    subj_maps[null_map]+= vol
+            #compute subj avg for regressor
+            notask_vols = len(subj_vol_dirs)-task_vols
+            subj_maps[l] /=  task_vols
+            subj_maps[null_map] /= notask_vols
+            #save subj-level maps
+            _save_map(subj_maps[l], ref_niis[i], subj_avg_vols_dir, (l))
+            _save_map(subj_maps[null_map], ref_niis[i], subj_avg_vols_dir, (null_map))
+            #update gd avg maps
+            gd_avg_maps[l] += subj_maps[l]
+            gd_avg_maps[null_map] += subj_maps[null_map]
+        #calc grand avg maps
+        gd_avg_maps[l] /= len(subjs)
+        gd_avg_maps[null_map] /= len(subjs)
+        #save grand maps
+        #am using zeroth nifti file as Reference
+        #however, any file in list is ok since subjs are warped to common space
+        _save_map(gd_avg_maps[l], ref_niis[0], avg_vols_dir, (l))
+        _save_map(gd_avg_maps[null_map], ref_niis[0], avg_vols_dir, (null_map))
+
 
 def _save_map(map, reference, save_dir, ext):
     """
@@ -136,8 +130,8 @@ def _save_map(map, reference, save_dir, ext):
     Takes an array corresponding to a regressor map, a reference nifti file and
     a saving directory and outputs a saved nifti file corresponding to regressor map.
     Only needed b/c I am using nibabel and nifti format.
-    This might be taken out entirely in future if we decide to use other libraries or
-    file formats like  hdr.
+    This might be taken out entirely in future if we decide to use other libraries or other
+    file formats (e.g.,hdr).
     """
     ref = nib.load(reference)
     nii = nib.Nifti1Image(map, ref.affine, ref.header)

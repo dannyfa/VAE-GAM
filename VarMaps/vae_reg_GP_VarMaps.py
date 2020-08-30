@@ -7,8 +7,8 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added L1 regularization to all covariate maps. This helps correcting spurious signals.
 
 To Do's
+- Make variance be parametrized by nn
 - Consider other 'cheaper' init options.
-- Mk model able to handle init and noinit versions.
 - Add sMC for time series modeling.
 - Add time dependent latent space plotting. And improve overall visual quality of LS plot ...
 - Mk it flexible enough to automate transference to other dsets.
@@ -58,8 +58,8 @@ class VAE(nn.Module):
 			os.makedirs(self.save_dir)
 		# init epsilon param modeling additional single voxel variance
 		# -log(10) initial value accounts for removing model_precision term from original version
-		epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
-		self.epsilon = torch.nn.Parameter(epsilon)
+		#epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
+		#self.epsilon = torch.nn.Parameter(epsilon)
 		# init. task cons as a nn param
 		# am using variance scld avg of task effect map from SPM as init here.
 		self.beta_init = torch.FloatTensor(np.array(nib.load(task_init).dataobj)).to(self.device)
@@ -229,14 +229,14 @@ class VAE(nn.Module):
 		h = F.relu(self.convt2(h))
 		h = F.relu(self.convt3(self.bnt3(h)))
 		h = F.relu(self.convt4(h))
-		mu_map = torch.sigmoid(self.convt51(self.bnt51(h)).squeeze(1).view(-1,IMG_DIM))
-		var_map = torch.sigmoid(self.convt52(self.bnt52(h)).squeeze(1).view(-1,IMG_DIM))
+		mu_map = torch.sigmoid(self.convt51(self.bnt51(h)).squeeze(1).view(-1,IMG_DIM)) #why is sigmoid needed here?
+		var_map = torch.exp(self.convt52(self.bnt52(h)).squeeze(1).view(-1,IMG_DIM)) #variance must be non-negative.
 		return mu_map, var_map
 
 
 	def forward(self, ids, covariates, x, return_latent_rec=False):
 		imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{}, \
-		'z_mot':{}, 'pitch_mot':{}, 'roll_mot':{}, 'yaw_mot':{}, 'full_rec': {}}
+		'z_mot':{}, 'pitch_mot':{}, 'roll_mot':{}, 'yaw_mot':{}, 'full_rec': {}, 'variance': {}}
 		imgs_keys = list(imgs.keys())
 		gp_params_keys = list(self.gp_params.keys())
 		#set batch GP_loss to zero
@@ -259,16 +259,15 @@ class VAE(nn.Module):
 		#put these in appropriate shape
 		x_rec_mean = x_rec_mean.view(x.shape[0], -1)
 		x_rec_var = x_rec_var.view(x.shape[0], -1)
-		imgs['base']['mu'] = x_rec_mean.detach().cpu().numpy()
-		imgs['base']['sigma'] = x_rec_var.detach().cpu().numpy()
+		imgs['base'] = x_rec_mean.detach().cpu().numpy()
+		imgs['variance'] = x_rec_var.detach().cpu().numpy()
 		for i in range(1,self.num_covariates+1):
 			cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
 			dtype=torch.int64), self.num_covariates+1)
 			cov_oh = cov_oh.to(self.device).float()
 			zcat = torch.cat([z, cov_oh], 1).float()
-			diff, diff_var = self.decode(zcat)
+			diff,_ = self.decode(zcat)
 			diff = diff.view(x.shape[0], -1)
-			diff_var = diff_var.view(x.shape[0], -1)
 			#get params for GP regressor
 			Xu = self.gp_params[gp_params_keys[i-1]]['xu']
 			Yu = self.gp_params[gp_params_keys[i-1]]['y']
@@ -291,31 +290,23 @@ class VAE(nn.Module):
 			task_var = covariates[:, i-1] + y_q
 			#use this to scale effect map
 			cons = torch.einsum('b,bx->bx', task_var, diff)
-			cons_var = torch.einsum('b,bx->bx', y_vars, diff_var)
 			#add cons to init_task param if covariate == 'task'
 			#implementation below was adopted to avoid in place ops that would cause autograd errors
 			if i==1:
 				cons = cons + self.task_init.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1)
-				#adding init only to mean map. To me this is reasonable!
-			#making l1 regulatization applicable only to mean maps...
-			#another potential cause of problems in this version of model...
+			#making l1 regulatization applicable only to mean maps
 			l1_loss = torch.norm(cons, p=1)
 			l1_reg += l1_loss
 			x_rec_mean = x_rec_mean + cons
-			x_rec_var = x_rec_var + cons_var
-			imgs[imgs_keys[i]]['mu'] = cons.detach().cpu().numpy()
-			imgs[imgs_keys[i]]['sigma'] = cons_var.detach().cpu().numpy()
-		imgs['full_rec']['mu']=x_rec_mean.detach().cpu().numpy()
-		imgs['full_rec']['sigma']=x_rec_var.detach().cpu().numpy()
+			imgs[imgs_keys[i]] = cons.detach().cpu().numpy()
+		imgs['full_rec'] = x_rec_mean.detach().cpu().numpy()
 		# calculating loss for VAE ...
 		elbo = -kl.kl_divergence(latent_dist, self.z_prior) #shape = batch_dim
 		#obs_dist.shape = batch_dim, img_dim
-		#calc tot variance
-		#exp here to guarantee all vals are positive ...
-		tot_var = torch.exp(x_rec_var.float()) + \
-		torch.exp(-self.epsilon.unsqueeze(0).view(1, -1).expand(ids.shape[0], -1).float())
+		#total variance in this case is JUST base map variance...
+		tot_var = x_rec_var.float()
 		obs_dist = Normal(x_rec_mean.float(),\
-		torch.sqrt(tot_var))
+		torch.sqrt(tot_var)) #sqrt here is because torch Normal expects mean and std as inputs.
 		log_prob = obs_dist.log_prob(x.view(ids.shape[0], -1))
 		#sum over img_dim to get a batch_dim tensor
 		sum_log_prob = torch.sum(log_prob, dim=1)
@@ -382,7 +373,7 @@ class VAE(nn.Module):
 		state['epoch'] = self.epoch
 		state['lr'] = self.lr
 		state['save_dir'] = self.save_dir
-		state['epsilon'] = self.epsilon
+		#state['epsilon'] = self.epsilon
 		state['task_init'] = self.task_init
 		state['beta_init'] = self.beta_init
 		state['l1_scale'] = self.l1_scale
@@ -425,7 +416,7 @@ class VAE(nn.Module):
 		self.optimizer.load_state_dict(checkpoint['optimizer_state'])
 		self.loss = checkpoint['loss']
 		self.epoch = checkpoint['epoch']
-		self.epsilon = checkpoint['epsilon']
+		#self.epsilon = checkpoint['epsilon']
 		self.beta_init = checkpoint['beta_init']
 		self.task_init = checkpoint['task_init']
 		self.l1_scale = checkpoint['l1_scale']
@@ -506,16 +497,15 @@ class VAE(nn.Module):
 		with torch.no_grad():
 			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True)
 			for key in imgs.keys():
-				for map in ('mu', 'sigma'):
-					filename = 'recon_{}_{}.nii'.format(key, map)
-					filepath = os.path.join(save_dir, filename)
-					reconstructed = imgs[key][map]
-					recon_array = reconstructed.reshape(41,49,35)
-					#use nibabel to load in header and affine of filename
-					#call that when writing recon_nifti
-					input_nifti = nib.load(ref_nii)
-					recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
-					nib.save(recon_nifti, filepath)
+				filename = 'recon_{}.nii'.format(key)
+				filepath = os.path.join(save_dir, filename)
+				reconstructed = imgs[key]
+				recon_array = reconstructed.reshape(41,49,35)
+				#use nibabel to load in header and affine of filename
+				#call that when writing recon_nifti
+				input_nifti = nib.load(ref_nii)
+				recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
+				nib.save(recon_nifti, filepath)
 
 	def plot_GPs(self, csv_file = '', save_dir = ''):
 		"""

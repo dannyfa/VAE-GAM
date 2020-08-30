@@ -11,8 +11,8 @@ import random
 import torch
 import time
 import DataClass_GP as data
-import vae_reg_GP as vae_reg
-import build_model_recons as recon
+import vae_reg_GP_VarMaps as vae_reg
+import build_model_recons_VarMaps as recon
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')
 
@@ -76,7 +76,7 @@ if __name__ == "__main__":
 		save_freq = args.save_freq, save_dir=args.save_dir)
 	model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
 	model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
-	#recon.mk_single_volumes(fMRI_data, model, args.csv_file, args.save_dir)
-	#recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = False)
+	recon.mk_single_volumes(fMRI_data, model, args.csv_file, args.save_dir)
+	recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = False)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))
