@@ -48,7 +48,7 @@ for i in range(len(subj_dirs)):
     if RE.search(subj_dirs[i]):
         subjs.append(subj_dirs[i])
 
-maps = ['base', 'task', 'x_mot', 'y_mot', 'z_mot', 'pitch_mot', 'yaw_mot', 'roll_mot']
+maps = ['task', 'x_mot', 'y_mot', 'z_mot', 'pitch_mot', 'yaw_mot', 'roll_mot']
 
 for subj in subjs:
     #get subj full reconstruction avg map
@@ -89,5 +89,5 @@ for subj in subjs:
             # sum is over total # of task volumes in this case
             top = np.array(numerator).mean()
             bottom = np.array(denominator).mean()
-            subj_cov_explained_vars =  top/bottom
-            print('Covariate {} variance ratio is: {:.2e}'.format(map, subj_cov_explained_vars))
+            subj_cov_explained_vars =  1 - (bottom - (top/bottom))/bottom
+            print('Covariate {} explained variance is: {:.2e}'.format(map, subj_cov_explained_vars))
