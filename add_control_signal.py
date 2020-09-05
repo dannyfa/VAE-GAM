@@ -198,20 +198,22 @@ else:
                 imgs.append(img)
             else:
                 pass
-    #get just one of these numbers, say a '0'
+    #get just one of these numbers
     #if using '3'
+    #small three
     #three = imgs[1].resize((7, 7)) #resize it to 7x7.
-    #three = imgs[1].resize((13, 13)) #resize it to 13x13
-    #three = np.asarray(three)
-    #norm_three = three/255 #scale
-    #sig = args.intensity*norm_three #multiply by signal intensity
+    #large 3
+    three = imgs[1].resize((13, 13)) #resize it to 13x13
+    three = np.asarray(three)
+    norm_three = three/255 #scale
+    sig = args.intensity*norm_three #multiply by signal intensity
 
     #if using '0'
     #zero = imgs[0].resize((7, 7)) #resize it to 7x7.
-    zero = imgs[0].resize((13, 13)) #resize it to 13x13
-    zero = np.asarray(zero)
-    norm_zero = zero/255 #scale
-    sig = args.intensity*norm_zero #multiply by signal intensity
+    #zero = imgs[0].resize((13, 13)) #resize it to 13x13
+    #zero = np.asarray(zero)
+    #norm_zero = zero/255 #scale
+    #sig = args.intensity*norm_zero #multiply by signal intensity
 
     rot_sig = ndimage.rotate(sig, -90) #this is needed given struct of fmri arr
     #signal = np.broadcast_to(rot_sig, (10, 7, 7)) #broadcast to desired shape
@@ -223,9 +225,9 @@ else:
     #for medium three (9x9)
     #control_sig[15:25, 34:43, 9:18]+= signal
     #for large three (13x13)
-    #control_sig[15:25, 34:47, 9:22]+= signal
+    control_sig[15:25, 34:47, 9:22]+= signal
     #for large zero (13x13)
-    control_sig[15:25, 34:47, 8:21]+= signal
+    #control_sig[15:25, 34:47, 8:21]+= signal
 
 #now get time-series using link function
 #TR and 0-20 range established based on acquisition & task design params for checker dset
