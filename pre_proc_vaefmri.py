@@ -41,8 +41,10 @@ parser.add_argument('--data_dir', type=str, metavar='N', default='', \
 help='Root dir where nii files and .tsv file are located')
 parser.add_argument('--save_dir', type=str, metavar='N', default='', \
 help='Dir where csv file to be given as input to FMRIDataset class is saved.')
-parser.add_argument('--checker_task', type=bool, metavar='N', default=True, \
-help='Boolean to indicate whether to create csv file for checker set or for controls. Defaults to creating file for original checker dset.')
+parser.add_argument('--checker', type=bool, metavar='N', default=False, \
+help='If true, will create csv file for actual checker task.')
+parser.add_argument('--control', type=bool, metavar='N', default=False, \
+help='If true, will create csv file for added signal control w/ specified link function.')
 parser.add_argument('--link_function', type=str, metavar='N', default='normal_hrf', \
 help='Link function for added (control) signal time series. IF creating checker csv, this MUST be normal hrf.')
 
@@ -67,8 +69,8 @@ else:
         pass
 
 #make sure that if checker_task == True, link_function == normal_hrf
-if args.checker_task== True:
-    assert args.link_function == 'normal_hrf', 'IF checker_task if True, link function MUST be normal_hrf!'
+if args.checker:
+    assert args.link_function == 'normal_hrf', 'IF checker bool is True, link function MUST be normal_hrf!'
 
 #make sure link_function is one of 3 allowed options
 if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta']:
@@ -95,7 +97,7 @@ raw_data_files = []
 raw_reg_files = []
 for i in range(len(subjs)):
     full_path = os.path.join(args.data_dir, subjs[i])
-    for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled_ALTERED_small_three_600_inverted_delta_07_02_2020.nii.gz'):
+    for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled_ALTERED_large_three_1000_normal_hrf_09_04_2020.nii.gz'):
         raw_data_files.append(str(data_file))
     for reg_file in Path(full_path).rglob('sub-A000*_ses-NFB2_task-CHECKERBOARD_acq-1400_desc-confounds_regressors.tsv'):
         raw_reg_files.append(str(reg_file))
@@ -219,9 +221,9 @@ for i in raw_df['subjs']:
     TR=1.4
     vol_times = np.arange(1, vols +1) * TR
     #use original stimToneural if checker_task==True
-    if args.checker_task == True:
+    if args.checker:
         neural = stimulus_to_neural(vol_times)
-    else:
+    if args.control:
         neural = control_stimulus_to_neural(vol_times)
 
     if args.link_function == 'normal_hrf':
@@ -275,5 +277,5 @@ for i in raw_df['subjs']:
 #name for saved file can also be made more flexible here ...
 new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", \
 "task_bin", "x", "y", "z", "rot_x", "rot_y", "rot_z"])
-save_path = os.path.join(args.save_dir, 'preproc_dset_ALTERED_small_three_600_inverted_delta_07_02_2020.csv')
+save_path = os.path.join(args.save_dir, 'preproc_dset_ALTERED_large_three_1000_normal_hrf_09_04_2020.csv')
 new_df.to_csv(save_path)
