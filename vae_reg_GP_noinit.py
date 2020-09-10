@@ -25,7 +25,7 @@ from torchvision import datasets, transforms
 from torch.distributions import LowRankMultivariateNormal, Normal, kl
 #uncomment if needing to chase-down a nan in loss
 #from torch import autograd
-import umap
+from umap import UMAP
 import os
 import itertools
 from sklearn.decomposition import PCA
@@ -452,7 +452,7 @@ class VAE(nn.Module):
 				latent[j:j+len(mu)] = mu.detach().cpu().numpy()
 				j += len(mu)
 		# UMAP them.
-		transform = umap.UMAP(n_components=2, n_neighbors=20, min_dist=0.1, \
+		transform = UMAP(n_components=2, n_neighbors=20, min_dist=0.1, \
 		metric='euclidean', random_state=42)
 		projection = transform.fit_transform(latent)
 		#print(projection.shape)
