@@ -43,12 +43,12 @@ parser.add_argument('--num_inducing_pts', type=int, metavar='N', default=6, \
 help='Number of inducing points for regressor GPs.')
 parser.add_argument('--mll_scale', type=float, metavar='N', default=10.0, \
 help='Scaling factor for marginal likelihood loss of GPs.')
-parser.add_argument('--from_ckpt', type=bool, metavar='N', default=False, \
-help='Boolen indicating if training or reconstruction should be done using a pre-trained model.')
+parser.add_argument('--from_ckpt', type=str, metavar='N', default="False", \
+help='Str taking bool value to indicate if training or reconstruction should be done using a pre-trained model.')
 parser.add_argument('--ckpt_path', type=str, metavar='N', default='', \
-help='Path to ckpt with saved model state to be loaded. Only effective if --from_ckpt == True.')
-parser.add_argument('--recons_only', type=bool, metavar='N', default=False, \
-help='Boolean indicating if trainig is to be skipped. Only use if wanting to inspect reconstruction from intermediate ckpt files.')
+help='Path to ckpt with saved model state to be loaded. Only effective if --from_ckpt == "True".')
+parser.add_argument('--recons_only', type=str, metavar='N', default="False", \
+help='Str taking bool value to indicate if trainig is to be skipped. Only use if wanting to inspect reconstruction from intermediate ckpt files.')
 
 args = parser.parse_args()
 torch.manual_seed(args.seed)
@@ -67,11 +67,11 @@ if __name__ == "__main__":
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, \
 	mll_scale = args.mll_scale, l1_scale=args.l1_scale)
-	if args.from_ckpt == True:
+	if args.from_ckpt == "True":
 		print('='*40)
 		print('Loading model state from: {}'.format(args.ckpt_path))
 		model.load_state(filename = args.ckpt_path)
-	if not args.recons_only == True:
+	if not args.recons_only == "True":
 		model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq,\
 		save_freq = args.save_freq, save_dir=args.save_dir)
 	model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
