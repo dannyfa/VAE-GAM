@@ -1,5 +1,8 @@
 """
 Wrapper to call in data class, loaders and vae_reg model
+ToDo:
+- merge versions w/ and out initialization option
+- modificatiosn needed both here and on vae_reg_GP model
 
 """
 import os, sys
@@ -8,7 +11,7 @@ import numpy as np
 import random
 import torch
 import time
-import DataClass_GP as data #w/ FMRIDataClass, trsfm and loaders
+import DataClass_GP as data
 import vae_reg_GP_noinit as vae_reg
 import build_model_recons as recon
 
@@ -60,7 +63,7 @@ if __name__ == "__main__":
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	model = vae_reg.VAE(num_inducing_pts = args.num_inducing_pts, \
 	mll_scale = args.mll_scale)
-	if args.from_ckpt=="True":
+	if args.from_ckpt == "True":
 		print('='*40)
 		print('Loading model state from: {}'.format(args.ckpt_path))
 		model.load_state(filename = args.ckpt_path)
