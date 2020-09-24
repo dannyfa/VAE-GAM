@@ -505,6 +505,10 @@ class VAE(nn.Module):
 		Plot inducing points &
 		posterior mean +/- 2tds for a trained GPs
 
+		Also outputs a file containing per covariate GP mean variance
+		This info is used by post-processing scripts to merge maps
+		of cte covariates with base map.
+
 		Parameters
 		----------
 		csv_file: file containing data for model
@@ -512,6 +516,15 @@ class VAE(nn.Module):
 				   Will take only covariates from it though...
 
 		"""
+
+		#create dict to hold coveriate yq variances
+		keys = ['task', 'x_trans', 'y_trans', 'z_trans', 'x_rot', 'y_rot', 'z_rot']
+		covariates_mean_vars = dict.fromkeys(keys)
+		#setup output dir
+		outdir_name = str(self.epoch).zfill(3) + '_GP_plots'
+		plot_dir = os.path.join(save_dir, outdir_name)
+		if not os.path.exists(plot_dir):
+			os.makedirs(plot_dir)
 		#read in values for each regressor from csv_file
 		#pass them to torch as a float tensor
 		data = pd.read_csv(csv_file)
@@ -532,6 +545,10 @@ class VAE(nn.Module):
 			covariates = all_covariates[:, i]
 			xq = covariates.to(self.device)
 			yq, yvar = gp_regressor.predict(xq)
+			#calc variance of predicted GP mean
+			#and pass it to dict
+			yq_variance = torch.var(yq)
+			covariates_mean_vars[keys[i]] = [yq_variance.detach().cpu().numpy()]
 			#pass vars to cpu and np prior to plotting
 			x_u = xu.detach().cpu().numpy()
 			y_u = yu.detach().cpu().numpy()
@@ -552,13 +569,14 @@ class VAE(nn.Module):
 			plt.xlabel('X')
 			plt.ylabel('Y')
 			#save plot
-			dir_name = str(self.epoch).zfill(3) + '_GP_plots'
-			plot_dir = os.path.join(save_dir, dir_name)
-			if not os.path.exists(plot_dir):
-				os.makedirs(plot_dir)
 			filename = 'GP_{}_{}.pdf'.format(regressors[i], 'full_set')
 			file_path = os.path.join(plot_dir, filename)
 			plt.savefig(file_path)
+		#now save dict entries to a csv_file
+		outcsv_name = str(self.epoch).zfill(3) + '_GP_yq_variances.csv'
+		covariate_mean_vars_data = pd.DataFrame.from_dict(covariates_mean_vars)
+		covariate_mean_vars_data.to_csv(os.path.join(plot_dir, outcsv_name))
+
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
