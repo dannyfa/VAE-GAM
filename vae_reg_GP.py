@@ -518,7 +518,7 @@ class VAE(nn.Module):
 		"""
 
 		#create dict to hold coveriate yq variances
-		keys = ['task', 'x_trans', 'y_trans', 'z_trans', 'x_rot', 'y_rot', 'z_rot']
+		keys = ['task', 'x_mot', 'y_mot', 'z_mot', 'pitch_mot', 'roll_mot', 'yaw_mot']
 		covariates_mean_vars = dict.fromkeys(keys)
 		#setup output dir
 		outdir_name = str(self.epoch).zfill(3) + '_GP_plots'

@@ -13,6 +13,7 @@ import time
 import DataClass_GP as data
 import vae_reg_GP as vae_reg
 import build_model_recons as recon
+import zeroGPmeans as post_proc #small module for post-processing
 
 parser = argparse.ArgumentParser(description='user args for vae_reg model')
 
@@ -49,6 +50,8 @@ parser.add_argument('--ckpt_path', type=str, metavar='N', default='', \
 help='Path to ckpt with saved model state to be loaded. Only effective if --from_ckpt == "True".')
 parser.add_argument('--recons_only', type=str, metavar='N', default="False", \
 help='Str taking bool value to indicate if trainig is to be skipped. Only use if wanting to inspect reconstruction from intermediate ckpt files.')
+parser.add_argument('--gp_cutoff', type=float, metavar='N', default=1e-6, \
+help='GP mean variance cutoff for merging covariate maps to base.')
 
 args = parser.parse_args()
 torch.manual_seed(args.seed)
@@ -78,5 +81,7 @@ if __name__ == "__main__":
 	model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
 	recon.mk_single_volumes(fMRI_data, model, args.csv_file, args.save_dir)
 	recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = False)
+	#run post-processing to zero GP means!!
+	post_proc.run_postproc(model, args.save_dir, args.gp_cutoff)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))
