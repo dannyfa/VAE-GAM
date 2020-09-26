@@ -3,13 +3,14 @@ Short script to add a control signal to original pre_processed data.
 
 Control signals can be of 2 shapes:
 1)4 small spheres added to frontal lobe.
-2)A number -- in this case '3' added to frontal lobe.
+2)A number -- in this case as 13x13 hand-written '3' added to frontal lobe.
 
 These can be either convolved w/ HRF (as per usual) OR
 Have a different (more challenging) link function.
-Challenge link functions are of 2 types;
+Challenge link functions are of 3 types;
 1) Linear w/ a saturation (linear_sat)
 2) Inverted-V (inverted_delta)
+3) Inverted-U (parabola)
 
 Block-design chosen was opposite to one seen for real effect in V1 for all link functions AND shapes added.
 
@@ -49,7 +50,7 @@ help='Radius of spheres to be added.Only used if type == simple')
 parser.add_argument('--size', type=int, metavar='N', default=7, \
 help='Dim of 3D array containing spherical masks. This is an A*A*A cube. Only used if type == simple')
 parser.add_argument('--link_function', type=str, metavar='N', default='normal_hrf', \
-help='Link function for added signal time series. Can be either normal_hrf, linear_sat or inverted_delta.')
+help='Link function for added signal time series. Can be either normal_hrf, linear_sat, inverted_delta or inverted_u.')
 
 args = parser.parse_args()
 
@@ -61,9 +62,9 @@ else:
         sys.exit()
 
 #make sure link_function is one of 3 allowed options
-if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta']:
+if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
     print('Link function given is NOT supported.')
-    print('Please choose between normal_hrf, linear_sat OR inv_delta')
+    print('Please choose between normal_hrf, linear_sat, inv_delta OR inverted_u')
     sys.exit()
 
 #define helper functions
@@ -119,7 +120,7 @@ def stimulus_to_neural(vol_times):
         res.append(task)
     return(np.array(res))
 
-#creates a series with lenear increase up to 7th item
+#creates a series with linear increase up to 7th item
 #f/b flattening (saturation)
 def sat_link(times):
     out = []
@@ -145,6 +146,13 @@ def inv_delta(times):
             res = 1.0 - ((1/7)*(t-6))
             out.append(res)
     return(out)
+
+#creates an inverted_u series w/ 14 pts total
+def inverted_u(x_coords):
+    y_coords = [-x*x for x in x_coords]
+    #make sure all #'s are + and max is 1.
+    y_coords = [ (x + 42.25)/42 for x in y_coords]
+    return y_coords;
 
 #get subjIDs
 #excluded sub-A00058952 due to high voxel intensity vals
@@ -192,15 +200,14 @@ else:
     for i, sample in enumerate(mnist_trainset):
         if i <=10:
             target = sample[1]
-            #get a 2 and a 3. WIll use 3 only for now...
+            #get a 0 and a 3. Will use first #3 only for now...
             if target == 0 or target ==3:
                 img = sample[0]
                 imgs.append(img)
             else:
                 pass
-    #get just one of these numbers
-    #if using '3'
-    #small three
+
+    #if using 3 signal
     #three = imgs[1].resize((7, 7)) #resize it to 7x7.
     #large 3
     three = imgs[1].resize((13, 13)) #resize it to 13x13
@@ -208,16 +215,18 @@ else:
     norm_three = three/255 #scale
     sig = args.intensity*norm_three #multiply by signal intensity
 
-    #if using '0'
+    #if using 0 signal
     #zero = imgs[0].resize((7, 7)) #resize it to 7x7.
     #zero = imgs[0].resize((13, 13)) #resize it to 13x13
     #zero = np.asarray(zero)
     #norm_zero = zero/255 #scale
     #sig = args.intensity*norm_zero #multiply by signal intensity
 
-    rot_sig = ndimage.rotate(sig, -90) #this is needed given struct of fmri arr
-    #signal = np.broadcast_to(rot_sig, (10, 7, 7)) #broadcast to desired shape
-    signal = np.broadcast_to(rot_sig, (10, 13, 13)) #broadcast to desired shape
+    #90 degrees needed given struct of fmri arr
+    rot_sig = ndimage.rotate(sig, -90)
+    #broadcast signal to desired shape
+    #signal = np.broadcast_to(rot_sig, (10, 7, 7)) #small signal size
+    signal = np.broadcast_to(rot_sig, (10, 13, 13)) #large signal size
     #create empty arr to hold control signal
     control_sig = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
     #for small three (7x7)
@@ -255,7 +264,7 @@ elif args.link_function == 'linear_sat':
     time_series[28:42]+= lin_sat_block
     time_series[57:71]+= lin_sat_block
     time_series[83:97]+= lin_sat_block
-else:
+elif args.link_function == 'inverted_delta':
     #i.e., if link function is inverted_delta
     #build inverted delta series for each task block
     task_times = np.arange(0, 14, 1)
@@ -268,6 +277,19 @@ else:
     time_series[28:42]+= inv_delta_block
     time_series[57:71]+= inv_delta_block
     time_series[83:97]+= inv_delta_block
+else:
+    #get time pts
+    inverted_u_times = np.arange(-6.5, 7.5, 1)
+    #get corresponding inverted_u time time_series
+    inverted_u_block = inverted_u(inverted_u_times)
+    #now build entire series w/ blocks of inverted_u task effect
+    #and blocks w/ out it
+    #order of blocks is opposite of V1 effect in original
+    time_series = np.zeros(98)
+    time_series[0:14] += inverted_u_block
+    time_series[28:42]+= inverted_u_block
+    time_series[57:71]+= inverted_u_block
+    time_series[83:97]+= inverted_u_block
 
 #get date & intensity in str form
 ts = datetime.datetime.now().date()

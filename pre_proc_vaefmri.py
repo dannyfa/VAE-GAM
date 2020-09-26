@@ -7,12 +7,12 @@ Added:
 HRF convolution piece -- makes task real-valued
 Binary task category is still stored under task_bin var
 
-Motion params -- x, y, z, pitch, yaw and roll
+Motion params -- x, y, z, pitch, roll and yaw.
 These are per vol and per subj
 If using original SPM files:
     these need to be resaved b/c scipy does not deal well with MatLab struct
 If coming from fmriprep:
-    just read tsv -- this is current version shown here
+    just read tsv -- this is current version shown here!
 
 Can be used for either checker set or for creating controls.
 Main difference between these two is on StimToNeural function (see cmts below).
@@ -73,9 +73,9 @@ if args.checker:
     assert args.link_function == 'normal_hrf', 'IF checker bool is True, link function MUST be normal_hrf!'
 
 #make sure link_function is one of 3 allowed options
-if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta']:
+if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
     print('Link function given is NOT supported.')
-    print('Please choose between normal_hrf, linear_sat OR inv_delta')
+    print('Please choose between normal_hrf, linear_sat, inv_delta OR inverted_u')
     sys.exit()
 
 #get subjIDs
@@ -197,6 +197,13 @@ def inv_delta(times):
             out.append(res)
     return(out)
 
+#creates an inverted_u series w/ 14 pts total
+def inverted_u(x_coords):
+    y_coords = [-x*x for x in x_coords]
+    #make sure all #'s are + and max is 1 for given time range used here.
+    y_coords = [ (x + 42.25)/42 for x in y_coords]
+    return y_coords;
+
 #Building final csv file
 samples = []
 for i in raw_df['subjs']:
@@ -248,8 +255,7 @@ for i in raw_df['subjs']:
         time_series[57:71]+= lin_sat_block
         time_series[83:97]+= lin_sat_block
 
-    else:
-        #i.e., if link function is inverted_delta
+    elif args.link_function == 'inverted_delta':
         #build inverted delta series for each task block
         task_times = np.arange(0, 14, 1)
         inv_delta_block = inv_delta(task_times)
@@ -261,6 +267,19 @@ for i in raw_df['subjs']:
         time_series[28:42]+= inv_delta_block
         time_series[57:71]+= inv_delta_block
         time_series[83:97]+= inv_delta_block
+    else:
+        #get time pts
+        inverted_u_times = np.arange(-6.5, 7.5, 1)
+        #get corresponding inverted_u time time_series
+        inverted_u_block = inverted_u(inverted_u_times)
+        #now build entire series w/ blocks of inverted_u task effect
+        #and blocks w/ out it
+        #order of blocks is opposite of V1 effect in original
+        time_series = np.zeros(98)
+        time_series[0:14] += inverted_u_block
+        time_series[28:42]+= inverted_u_block
+        time_series[57:71]+= inverted_u_block
+        time_series[83:97]+= inverted_u_block
 
     #finally, build samples...
     for vol in range(vols):
@@ -272,7 +291,6 @@ for i in raw_df['subjs']:
         trans_y[vol], trans_z[vol], rot_x[vol], rot_y[vol], \
         rot_z[vol])
         samples.append(sample)
-
 #and save df
 #name for saved file can also be made more flexible here ...
 new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", \
