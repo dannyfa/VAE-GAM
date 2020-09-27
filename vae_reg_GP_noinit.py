@@ -69,7 +69,7 @@ class VAE(nn.Module):
 		self.max_ls = torch.as_tensor(7.0).to(self.device) #7 based on original runs/simulations. Seems ok value
 		self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
 		#for task
-		self.xu_task = torch.linspace(-0.5, 2.5, self.inducing_pts).to(self.device)
+		self.xu_task = torch.linspace(0.0, 1.0, self.inducing_pts).to(self.device)
 		self.gp_params['task']['xu'] = self.xu_task
 		self.Y_task = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
 		self.gp_params['task']['y'] = self.Y_task
