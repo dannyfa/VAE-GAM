@@ -4,9 +4,12 @@ Short script to add a control signal to original pre_processed data.
 Control signals can be of 2 shapes:
 1)4 small spheres added to frontal lobe.
 2)A number -- in this case as 13x13 hand-written '3' added to frontal lobe.
+Number three is first binarized (mask of 1 or 0's) before being scaled and added
+to controls.
 
-These can be either convolved w/ HRF (as per usual) OR
-Have a different (more challenging) link function.
+These can be either: 1)simply multiplied by task block time-series (simple_ts),
+2)convolved w/ HRF (immitating a biological signal) OR
+3)have a different (more challenging) link function.
 Challenge link functions are of 3 types;
 1) Linear w/ a saturation (linear_sat)
 2) Inverted-V (inverted_delta)
@@ -50,7 +53,7 @@ help='Radius of spheres to be added.Only used if type == simple')
 parser.add_argument('--size', type=int, metavar='N', default=7, \
 help='Dim of 3D array containing spherical masks. This is an A*A*A cube. Only used if type == simple')
 parser.add_argument('--link_function', type=str, metavar='N', default='normal_hrf', \
-help='Link function for added signal time series. Can be either normal_hrf, linear_sat, inverted_delta or inverted_u.')
+help='Link function for added signal time series. Can be either simple_ts, normal_hrf, linear_sat, inverted_delta or inverted_u.')
 
 args = parser.parse_args()
 
@@ -62,9 +65,9 @@ else:
         sys.exit()
 
 #make sure link_function is one of 3 allowed options
-if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
+if args.link_function not in ['simple_ts', 'normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
     print('Link function given is NOT supported.')
-    print('Please choose between normal_hrf, linear_sat, inv_delta OR inverted_u')
+    print('Please choose between simple_ts, normal_hrf, linear_sat, inv_delta OR inverted_u')
     sys.exit()
 
 #define helper functions
@@ -207,39 +210,35 @@ else:
             else:
                 pass
 
-    #if using 3 signal
-    #three = imgs[1].resize((7, 7)) #resize it to 7x7.
-    #large 3
-    three = imgs[1].resize((13, 13)) #resize it to 13x13
+    #create binary large 3 signal
+    three = imgs[1].resize((13, 13))
     three = np.asarray(three)
-    norm_three = three/255 #scale
-    sig = args.intensity*norm_three #multiply by signal intensity
-
-    #if using 0 signal
-    #zero = imgs[0].resize((7, 7)) #resize it to 7x7.
-    #zero = imgs[0].resize((13, 13)) #resize it to 13x13
-    #zero = np.asarray(zero)
-    #norm_zero = zero/255 #scale
-    #sig = args.intensity*norm_zero #multiply by signal intensity
-
-    #90 degrees needed given struct of fmri arr
+    norm_three = three/255
+    sig_mean = np.mean(norm_three.flatten())
+    sig_std = np.std(norm_three.flatten())
+    #am setting all pixels above 0.85std to 1 and rest to 0.
+    binary_sig = (np.where(norm_three.flatten() > (sig_mean + 0.85*sig_std), 1, 0)).reshape(norm_three.shape[0], \
+    norm_three.shape[1])
+    #scale by signal intensity
+    sig = args.intensity*binary_sig
+    #90 degrees rotation
+    #needed given struct of fmri arr
     rot_sig = ndimage.rotate(sig, -90)
     #broadcast signal to desired shape
-    #signal = np.broadcast_to(rot_sig, (10, 7, 7)) #small signal size
-    signal = np.broadcast_to(rot_sig, (10, 13, 13)) #large signal size
+    signal = np.broadcast_to(rot_sig, (10, 13, 13))
     #create empty arr to hold control signal
     control_sig = np.zeros((IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
-    #for small three (7x7)
-    #control_sig[15:25, 34:41, 9:16]+= signal
-    #for medium three (9x9)
-    #control_sig[15:25, 34:43, 9:18]+= signal
-    #for large three (13x13)
     control_sig[15:25, 34:47, 9:22]+= signal
-    #for large zero (13x13)
-    #control_sig[15:25, 34:47, 8:21]+= signal
 
 #now get time-series using link function
 #TR and 0-20 range established based on acquisition & task design params for checker dset
+
+if args.link_function == 'simple_ts':
+    vols = IMG_SHAPE[3]
+    TR = 1.4
+    vol_times = np.arange(1, vols +1) * TR
+    neural = stimulus_to_neural(vol_times)
+    time_series = neural #time series is simply a boxcar 
 if args.link_function == 'normal_hrf':
     TR=1.4
     vols = IMG_SHAPE[3]

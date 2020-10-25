@@ -73,9 +73,9 @@ if args.checker:
     assert args.link_function == 'normal_hrf', 'IF checker bool is True, link function MUST be normal_hrf!'
 
 #make sure link_function is one of 3 allowed options
-if args.link_function not in ['normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
+if args.link_function not in ['simple_ts', 'normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
     print('Link function given is NOT supported.')
-    print('Please choose between normal_hrf, linear_sat, inv_delta OR inverted_u')
+    print('Please choose between simple_ts, normal_hrf, linear_sat, inv_delta OR inverted_u')
     sys.exit()
 
 #get subjIDs
@@ -97,7 +97,7 @@ raw_data_files = []
 raw_reg_files = []
 for i in range(len(subjs)):
     full_path = os.path.join(args.data_dir, subjs[i])
-    for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled_ALTERED_large_three_1000_normal_hrf_09_04_2020.nii.gz'):
+    for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled_ALTERED_binary_large_3_1000_simple_ts_10_25_2020.nii.gz'):
         raw_data_files.append(str(data_file))
     for reg_file in Path(full_path).rglob('sub-A000*_ses-NFB2_task-CHECKERBOARD_acq-1400_desc-confounds_regressors.tsv'):
         raw_reg_files.append(str(reg_file))
@@ -230,10 +230,13 @@ for i in raw_df['subjs']:
     #use original stimToneural if checker_task==True
     if args.checker:
         neural = stimulus_to_neural(vol_times)
-    if args.control:
+    else:
         neural = control_stimulus_to_neural(vol_times)
 
-    if args.link_function == 'normal_hrf':
+    if args.link_function == 'simple_ts':
+        time_series = neural
+
+    elif args.link_function == 'normal_hrf':
         tr_times = np.arange(0, 20, TR)
         hrf_at_trs = hrf(tr_times)
         #convolve neural stim box-car series w/ HRF
@@ -295,5 +298,5 @@ for i in raw_df['subjs']:
 #name for saved file can also be made more flexible here ...
 new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", \
 "task_bin", "x", "y", "z", "rot_x", "rot_y", "rot_z"])
-save_path = os.path.join(args.save_dir, 'preproc_dset_ALTERED_large_three_1000_normal_hrf_09_04_2020.csv')
+save_path = os.path.join(args.save_dir, 'preproc_dset_ALTERED_binary_large_3_1000_simple_ts_10_25_2020.csv')
 new_df.to_csv(save_path)
