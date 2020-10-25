@@ -1,4 +1,7 @@
 """
+This script adopts per voxel, frequentist approach
+We will likely chnage it entirely to something else!!
+
 Short script to calculate TP, TN, FP, FN rates AND
 other associated stats for our model, namely:
 error = (FP + FN)/(TP + TN + FP + FN)
@@ -8,6 +11,7 @@ specificity = TN / (TN + FP)
 precision = TP/(TP + FP)
 false positive rate = FP / (FP + TN)
 false negative rate = FN / (FN + TP)
+true positive rate = TP/(TP + FN)
 
 Takes in paths to 2 maps:
 1) Ground-truth map (either a know signal -- i.e., if running for controls) or a map produced by std software (e.g., FSL)
@@ -92,9 +96,9 @@ if args.verbose == True:
     print('mean: {:.2f}, std: {:.2f}'.format(gt_mean, gt_std))
     print(40*'=')
     print('Experimental map descriptive stats are:\n')
-    print('mean: {:.2f}, std: {:.2f}'.format(exp_mean, exp_std))
+    print('mean: {:.3f}, std: {:.3f}'.format(exp_mean, exp_std))
 #now threshold maps & turn them into binary masks
-masked_gt = np.where(gt_map.flatten() > (gt_mean + args.cutoff*gt_std), 1, 0).reshape(x, y, z)
+masked_gt = np.where(gt_map.flatten() > (gt_mean + 6*gt_std), 1, 0).reshape(x, y, z)
 masked_exp = np.where(exp_map.flatten() > (exp_mean + args.cutoff*exp_std), 1, 0).reshape(x, y, z)
 #save these binary masks
 _save_map(masked_gt, args.gt, args.out_dir, 'gt')
@@ -121,6 +125,7 @@ sensitivity = tp/(tp + fn)
 specificity = tn/(tn + fp)
 precision = tp/(tp + fp)
 fpr = fp/(fp + tn)
+tpr = tp/(tp + fn)
 fnr = fn/(fn + tp)
 #now save these computed stats to a file
 ts = datetime.datetime.now().date()
@@ -136,7 +141,7 @@ f.write('tp: {}, tn: {}, fp: {}, fn: {}\n'.format(tp, tn, fp, fn))
 f.write (40*'#')
 f.write ('\n')
 f.write('Stats summaries: \n')
-f.write('error_rate: {:.2f}, accuracy: {:.2f}\n'.format(error_rate*100, accuracy*100))
-f.write('sensitivity: {:.2f}, specificity: {:.2f}\n'.format(sensitivity*100, specificity*100))
-f.write('precision: {:.2f}, false positive rate: {:.2f}, false negative rate: {:.2f}\n'.format(precision*100, fpr*100, fnr*100))
+f.write('error_rate: {:.3f}, accuracy: {:.3f}\n'.format(error_rate*100, accuracy*100))
+f.write('sensitivity: {:.3f}, specificity: {:.3f}\n'.format(sensitivity*100, specificity*100))
+f.write('precision: {:.3f}, false positive rate: {:.3f}, false negative rate: {:.3f}, true positive rate: {:.3f}\n'.format(precision*100, fpr*100, fnr*100, tpr*100))
 f.close()
