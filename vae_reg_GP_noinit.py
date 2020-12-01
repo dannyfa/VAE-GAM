@@ -501,9 +501,10 @@ class VAE(nn.Module):
 		Plot inducing points &
 		posterior mean +/- 2tds for a trained GPs
 
-		Also outputs a file containing per covariate GP mean variance
+		Also outputs : 1) a file containing per covariate GP mean variance
 		This info is used by post-processing scripts to merge maps
-		of cte covariates with base map.
+		of cte covariates with base map. 2) Several csv files (one per covariate)
+		with sorted xqs and their corresponding predicted means and variances.
 
 		Parameters
 		----------
@@ -512,7 +513,8 @@ class VAE(nn.Module):
 				   Will take only covariates from it though...
 
 		"""
-		#create dict to hold coveriate yq variances
+
+		#create dict to hold covariate yq variances
 		keys = ['task', 'x_mot', 'y_mot', 'z_mot', 'pitch_mot', 'roll_mot', 'yaw_mot']
 		covariates_mean_vars = dict.fromkeys(keys)
 		#setup output dir
@@ -528,6 +530,9 @@ class VAE(nn.Module):
 		all_covariates = torch.from_numpy(all_covariates)
 		regressors = list(self.gp_params.keys())
 		for i in range(len(regressors)):
+			#create dict to hold all entries for each cov -- original input + predicted mean
+			#and predicted vars for all points
+			curr_cov = {};
 			#build GP for the regressor
 			xu = self.gp_params[regressors[i]]['xu']
 			yu = self.gp_params[regressors[i]]['y']
@@ -540,6 +545,17 @@ class VAE(nn.Module):
 			covariates = all_covariates[:, i]
 			xq = covariates.to(self.device)
 			yq, yvar = gp_regressor.predict(xq)
+			#add vals to covar dict
+			curr_cov["xq"] = covariates
+			curr_cov["mean"] = yq.detach().cpu().numpy().tolist()
+			curr_cov["vars"] = yvar.detach().cpu().numpy().tolist()
+			#save this dict
+			outfull_name = str(self.epoch).zfill(3) + '_GP_' + keys[i] + '_full.csv'
+			covariate_full_data = pd.DataFrame.from_dict(curr_cov)
+			#sort out predictions
+			sorted_full_data = covariate_full_data.sort_values(by=["xq"])
+			#save them to csv file just in case
+			sorted_full_data.to_csv(os.path.join(plot_dir, outfull_name))
 			#calc variance of predicted GP mean
 			#and pass it to dict
 			yq_variance = torch.var(yq)
@@ -547,20 +563,19 @@ class VAE(nn.Module):
 			#pass vars to cpu and np prior to plotting
 			x_u = xu.detach().cpu().numpy()
 			y_u = yu.detach().cpu().numpy()
-			x_q = xq.detach().cpu().numpy()
-			y_q = yq.detach().cpu().numpy()
-			y_var = yvar.detach().cpu().numpy()
-			#create plot and save it
+			#create plots and save them
 			plt.clf()
+			plt.plot(sorted_full_data["xq"], sorted_full_data["mean"], c='darkblue', alpha=0.5, label='posterior mean')
+			two_sigma = 2*np.sqrt(sorted_full_data["vars"])
+			kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+			plt.fill_between(sorted_full_data["xq"], (sorted_full_data["mean"]-two_sigma), (sorted_full_data["mean"]+two_sigma), **kwargs)
 			plt.scatter(x_u, y_u, c='k', label='inducing points')
-			plt.plot(x_q, y_q, c='b', alpha=0.6, label='posterior mean')
-			two_sigma = 2*np.sqrt(y_var)
-			kwargs = {'color':'b', 'alpha':0.2, 'label':'2 sigma'}
-			plt.fill_between(x_q, y_q-two_sigma, y_q+two_sigma, **kwargs)
+			plt.locator_params(axis='x', nbins = 6)
+			plt.locator_params(axis='y', nbins = 4)
 			plt.legend(loc='best')
 			plt.title('GP Plot {}_{}'.format(regressors[i], 'full_set'))
-			plt.xlabel('X')
-			plt.ylabel('Y')
+			plt.xlabel('Covariate')
+			plt.ylabel('GP Prediction')
 			#save plot
 			filename = 'GP_{}_{}.pdf'.format(regressors[i], 'full_set')
 			file_path = os.path.join(plot_dir, filename)
@@ -569,6 +584,7 @@ class VAE(nn.Module):
 		outcsv_name = str(self.epoch).zfill(3) + '_GP_yq_variances.csv'
 		covariate_mean_vars_data = pd.DataFrame.from_dict(covariates_mean_vars)
 		covariate_mean_vars_data.to_csv(os.path.join(plot_dir, outcsv_name))
+
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
