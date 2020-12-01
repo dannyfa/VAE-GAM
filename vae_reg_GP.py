@@ -533,6 +533,9 @@ class VAE(nn.Module):
 		all_covariates = torch.from_numpy(all_covariates)
 		regressors = list(self.gp_params.keys())
 		for i in range(len(regressors)):
+			#create dict to hold all entries for cov -- input + predicted mean
+			#and predicted vars for all points
+			curr_cov = {};
 			#build GP for the regressor
 			xu = self.gp_params[regressors[i]]['xu']
 			yu = self.gp_params[regressors[i]]['y']
@@ -545,6 +548,14 @@ class VAE(nn.Module):
 			covariates = all_covariates[:, i]
 			xq = covariates.to(self.device)
 			yq, yvar = gp_regressor.predict(xq)
+			#add vals to covar dict
+			curr_cov["xq"] = covariates
+			curr_cov["mean"] = yq.detach().cpu().numpy().tolist()
+			curr_cov["vars"] = yvar.detach().cpu().numpy().tolist()
+			#save this dict
+			outfull_name = str(self.epoch).zfill(3) + '_GP_' + keys[i] + '_full.csv'
+			covariate_full_data = pd.DataFrame.from_dict(curr_cov)
+			covariate_full_data.to_csv(os.path.join(plot_dir, outfull_name))
 			#calc variance of predicted GP mean
 			#and pass it to dict
 			yq_variance = torch.var(yq)
@@ -576,7 +587,6 @@ class VAE(nn.Module):
 		outcsv_name = str(self.epoch).zfill(3) + '_GP_yq_variances.csv'
 		covariate_mean_vars_data = pd.DataFrame.from_dict(covariates_mean_vars)
 		covariate_mean_vars_data.to_csv(os.path.join(plot_dir, outcsv_name))
-
 
 	def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
 		print("="*40)
