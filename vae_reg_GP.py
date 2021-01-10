@@ -9,7 +9,7 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Testing a version w/ out ANY HRF convolution
   - Simply feeds bin task covariate to GP to get yq
   - Then adds these to same bin coveriate
-  - Use result of above to scale effect map. 
+  - Use result of above to scale effect map.
 
 To Do's
 - Consider other 'cheaper' init options.
@@ -235,7 +235,7 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 
-	def forward(self, ids, covariates, x, return_latent_rec=False):
+	def forward(self, ids, conv_task, covariates, x, return_latent_rec=False):
 		imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
 		'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
 		imgs_keys = list(imgs.keys())
@@ -286,7 +286,12 @@ class VAE(nn.Module):
 			#add it to gp_loss term
 			gp_loss += gp_mll
 			#add residual prediction from GP to task variable
-			task_var = covariates[:, i-1] + y_q
+			#implementing HRF conv option #1 - add GP prediction from binary stim to convolved task covariate
+			if i==1:
+				#this is task variable
+				task_var = conv_task.float() + y_q
+			else:
+				task_var = covariates[:, i-1] + y_q
 			#use this to scale effect map
 			#using EinSum to preserve batch dim
 			cons = torch.einsum('b,bx->bx', task_var, diff)
@@ -333,7 +338,9 @@ class VAE(nn.Module):
 			covariates = covariates.to(self.device)
 			ids = sample['subjid']
 			ids = ids.to(self.device)
-			loss = self.forward(ids, covariates, x)
+			conv_task = sample['conv_task']
+			conv_task = conv_task.to(self.device)
+			loss = self.forward(ids, conv_task, covariates, x)
 			train_loss += loss.item()
 			self.optimizer.zero_grad()
 			loss.backward()
@@ -354,7 +361,9 @@ class VAE(nn.Module):
 				covariates = covariates.to(self.device)
 				ids = sample['subjid']
 				ids = ids.to(self.device)
-				loss = self.forward(ids, covariates, x)
+				conv_task = sample['conv_task']
+				conv_task = conv_task.to(self.device)
+				loss = self.forward(ids, conv_task, covariates, x)
 				test_loss += loss.item()
 		test_loss /= len(test_loader.dataset)
 		print('Test loss: {:.4f}'.format(test_loss))
@@ -492,8 +501,11 @@ class VAE(nn.Module):
 		covariates = covariates.to(self.device)
 		ids = item['subjid'].view(1)
 		ids = ids.to(self.device)
+		#try w/ view as well here
+		conv_task = item['conv_task'].view(1)
+		conv_task = conv_task.to(self.device)
 		with torch.no_grad():
-			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True)
+			_, _, imgs = self.forward(ids, conv_task, covariates, x, return_latent_rec = True)
 			for key in imgs.keys():
 				filename = 'recon_{}.nii'.format(key)
 				filepath = os.path.join(save_dir, filename)
