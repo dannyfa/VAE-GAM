@@ -76,9 +76,9 @@ class ToTensor(object):
     def __call__(self, sample):
         subjid, volume, vol_num = sample['subjid'], sample['volume'], sample['vol_num']
         #Concat task w/ mot params by row
-        #added vol_num here for GP piece
-        covars = np.array([sample['task'], sample['trans_x'], sample['trans_y'], sample['trans_z'], \
-        sample['rot_x'], sample['rot_y'], sample['rot_z']], dtype=np.float64)
+        #added vol_num here for GP piece. This is technically not needed... Will take it out when revising scripts!!
+        covars = np.array([sample['task_bin'], sample['trans_x'], sample['trans_y'], \
+        sample['trans_z'], sample['rot_x'], sample['rot_y'], sample['rot_z']], dtype=np.float64)
         return{'covariates':torch.from_numpy(covars).float(),
                 'volume': torch.from_numpy(volume).float(),
                 'subjid': torch.tensor(subjid, dtype=torch.int64),

@@ -6,6 +6,10 @@ Z-based fMRIVAE regression model w/ task as a real variable (i.e, boxcar * HRF)
 - Added initilization using and avg of SPM's task beta map slcd to take only 11% of total explained variance
 - Added L1 regularization to all covariate maps. This helps correcting spurious signals.
 - Fixed GP plotting issues
+- Testing a version w/ out ANY HRF convolution
+  - Simply feeds bin task covariate to GP to get yq
+  - Then adds these to same bin coveriate
+  - Use result of above to scale effect map. 
 
 To Do's
 - Consider other 'cheaper' init options.
@@ -70,7 +74,7 @@ class VAE(nn.Module):
 		#pass these to a big dict -- i.e., gp_params
 		self.inducing_pts = num_inducing_pts
 		self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
-		self.max_ls = torch.as_tensor(10.0).to(self.device) #10 worked best empirically. See chckr replication folders on gungnir. 
+		self.max_ls = torch.as_tensor(10.0).to(self.device) #10 worked best empirically. See chckr replication folders on gungnir.
 		self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
 		#for task
 		self.xu_task = torch.linspace(-0.5, 2.5, self.inducing_pts).to(self.device)
