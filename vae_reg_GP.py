@@ -70,7 +70,7 @@ class VAE(nn.Module):
 		#pass these to a big dict -- i.e., gp_params
 		self.inducing_pts = num_inducing_pts
 		self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
-		self.max_ls = torch.as_tensor(7.0).to(self.device) #7 based on original runs/simulations. Seems ok value.
+		self.max_ls = torch.as_tensor(10.0).to(self.device) #10 worked best empirically. See chckr replication folders on gungnir. 
 		self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
 		#for task
 		self.xu_task = torch.linspace(-0.5, 2.5, self.inducing_pts).to(self.device)

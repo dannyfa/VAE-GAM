@@ -73,9 +73,9 @@ if args.checker:
     assert args.link_function == 'normal_hrf', 'IF checker bool is True, link function MUST be normal_hrf!'
 
 #make sure link_function is one of 3 allowed options
-if args.link_function not in ['simple_ts', 'normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
+if args.link_function not in ['simple_ts', 'jittered_ts', 'normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
     print('Link function given is NOT supported.')
-    print('Please choose between simple_ts, normal_hrf, linear_sat, inv_delta OR inverted_u')
+    print('Please choose between simple_ts, jittered_ts, normal_hrf, linear_sat, inv_delta OR inverted_u')
     sys.exit()
 
 #get subjIDs
@@ -235,6 +235,12 @@ for i in raw_df['subjs']:
 
     if args.link_function == 'simple_ts':
         time_series = neural
+
+    elif args.link_function == 'jittered_ts':
+        #am setting both times_series and neural to jittered seq here
+        times = np.arange(98)
+        time_series = np.where((times%2 ==0), 1, 0)
+        neural = time_series
 
     elif args.link_function == 'normal_hrf':
         tr_times = np.arange(0, 20, TR)

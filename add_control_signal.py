@@ -8,8 +8,9 @@ Number three is first binarized (mask of 1 or 0's) before being scaled and added
 to controls.
 
 These can be either: 1)simply multiplied by task block time-series (simple_ts),
-2)convolved w/ HRF (immitating a biological signal) OR
-3)have a different (more challenging) link function.
+2) simply multiplied by a jittered (alternating) time series (jittered_ts),
+3)convolved w/ HRF (immitating a biological signal) OR
+4)have a different (more challenging) link function.
 Challenge link functions are of 3 types;
 1) Linear w/ a saturation (linear_sat)
 2) Inverted-V (inverted_delta)
@@ -53,7 +54,7 @@ help='Radius of spheres to be added.Only used if type == simple')
 parser.add_argument('--size', type=int, metavar='N', default=7, \
 help='Dim of 3D array containing spherical masks. This is an A*A*A cube. Only used if type == simple')
 parser.add_argument('--link_function', type=str, metavar='N', default='normal_hrf', \
-help='Link function for added signal time series. Can be either simple_ts, normal_hrf, linear_sat, inverted_delta or inverted_u.')
+help='Link function for added signal time series. Can be either simple_ts, jittered_ts, normal_hrf, linear_sat, inverted_delta or inverted_u.')
 
 args = parser.parse_args()
 
@@ -65,9 +66,10 @@ else:
         sys.exit()
 
 #make sure link_function is one of 3 allowed options
-if args.link_function not in ['simple_ts', 'normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
+if args.link_function not in ['simple_ts', 'jittered_ts', \
+'normal_hrf', 'linear_sat', 'inverted_delta', 'inverted_u']:
     print('Link function given is NOT supported.')
-    print('Please choose between simple_ts, normal_hrf, linear_sat, inv_delta OR inverted_u')
+    print('Please choose between simple_ts, jittered_ts, normal_hrf, linear_sat, inv_delta OR inverted_u')
     sys.exit()
 
 #define helper functions
@@ -238,8 +240,11 @@ if args.link_function == 'simple_ts':
     TR = 1.4
     vol_times = np.arange(1, vols +1) * TR
     neural = stimulus_to_neural(vol_times)
-    time_series = neural #time series is simply a boxcar 
-if args.link_function == 'normal_hrf':
+    time_series = neural #time series is simply a boxcar
+elif args.link_function == 'jittered_ts':
+    times = np.arange(98)
+    time_series = np.where((times%2 ==0), 1, 0)
+elif args.link_function == 'normal_hrf':
     TR=1.4
     vols = IMG_SHAPE[3]
     tr_times = np.arange(0, 20, TR)

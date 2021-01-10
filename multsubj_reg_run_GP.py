@@ -23,20 +23,20 @@ parser.add_argument('--save_dir', type=str, metavar='N', default='', \
 help='Dir where model params, latent projection maps, GP plots and recon files are saved to. Defaults to saving files in current dir.')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', \
 help='Input batch size for training (default: 32)')
-parser.add_argument('--epochs', type=int, default=10, metavar='N',\
+parser.add_argument('--epochs', type=int, default=400, metavar='N',\
 help='Number of epochs to train (default: 10)')
 parser.add_argument('--seed', type=int, default=1, metavar='S', \
 help='Random seed (default: 1)')
-parser.add_argument('--save_freq', type=int, default=10, metavar='N', \
+parser.add_argument('--save_freq', type=int, default=100, metavar='N', \
 help='How many batches to wait before saving training status')
-parser.add_argument('--test_freq', type=int, default=2, metavar='N', \
+parser.add_argument('--test_freq', type=int, default=100, metavar='N', \
 help='How many batches to wait before testing')
 parser.add_argument('--split', type=int, metavar='N', default=98, \
 help='split # for project latent method. This is # of frames in each dset.')
 #adding initial task map argument & regularization scale args
 parser.add_argument('--task_init', type=str, metavar='N', default='', \
 help='Path to beta map used to init task contrast in model.')
-parser.add_argument('--l1_scale', type=float, metavar='N', default=1.0, \
+parser.add_argument('--l1_scale', type=float, metavar='N', default=0.05, \
 help='Scaling factor for task map L1 regularization term.')
 #adding args for number of inducing points for GPs and mll scale
 #these are mostly useful for troubleshooting GP Training
