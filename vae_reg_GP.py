@@ -39,6 +39,21 @@ import itertools
 from sklearn.decomposition import PCA
 import gp
 import pandas as pd
+from scipy.stats import gamma # for HRF funct
+
+#define HRF here ...
+#should  be able to import it though from preproc module
+#HRF funct.
+def hrf(times):
+    """ Return values for HRF at given times """
+    # Gamma pdf for the peak
+    peak_values = gamma.pdf(times, 6)
+    # Gamma pdf for the undershoot
+    undershoot_values = gamma.pdf(times, 12)
+    # Combine them
+    values = peak_values - 0.35 * undershoot_values
+    # Scale max to 0.6
+    return values / np.max(values) * 0.6
 
 # maintained shape of original nn by downsampling data on preprocessing
 IMG_SHAPE = (41,49,35)
@@ -235,7 +250,7 @@ class VAE(nn.Module):
 		return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
 
-	def forward(self, ids, conv_task, covariates, x, return_latent_rec=False):
+	def forward(self, ids, covariates, x, return_latent_rec=False):
 		imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
 		'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
 		imgs_keys = list(imgs.keys())
@@ -285,13 +300,19 @@ class VAE(nn.Module):
 			gp_mll = gp_regressor.calc_mll(Yu)
 			#add it to gp_loss term
 			gp_loss += gp_mll
-			#add residual prediction from GP to task variable
-			#implementing HRF conv option #1 - add GP prediction from binary stim to convolved task covariate
-			if i==1:
-				#this is task variable
-				task_var = conv_task.float() + y_q
-			else:
-				task_var = covariates[:, i-1] + y_q
+			task_var = covariates[:, i-1] + y_q
+			##implement HRF Option#2
+			##if this is what we choose, will need to  make a cleaner version of the implementation below
+			if i ==1:
+				#if covariate is task...
+				#need to convolve (GP output + covariate) result with HRF
+				#unsure if this is correct way to do it though ...
+				tr_times = np.arange(0, 20, 1.4) #TR==1.4 here
+				hrf_at_trs = hrf(tr_times)
+				time_series = np.convolve(task_var.detach().cpu().numpy(), hrf_at_trs)
+				n_to_remove = len(hrf_at_trs) - 1
+				time_series = time_series[:-n_to_remove]
+				task_var = torch.FloatTensor(time_series).to(self.device)
 			#use this to scale effect map
 			#using EinSum to preserve batch dim
 			cons = torch.einsum('b,bx->bx', task_var, diff)
@@ -338,9 +359,7 @@ class VAE(nn.Module):
 			covariates = covariates.to(self.device)
 			ids = sample['subjid']
 			ids = ids.to(self.device)
-			conv_task = sample['conv_task']
-			conv_task = conv_task.to(self.device)
-			loss = self.forward(ids, conv_task, covariates, x)
+			loss = self.forward(ids, covariates, x)
 			train_loss += loss.item()
 			self.optimizer.zero_grad()
 			loss.backward()
@@ -361,9 +380,7 @@ class VAE(nn.Module):
 				covariates = covariates.to(self.device)
 				ids = sample['subjid']
 				ids = ids.to(self.device)
-				conv_task = sample['conv_task']
-				conv_task = conv_task.to(self.device)
-				loss = self.forward(ids, conv_task, covariates, x)
+				loss = self.forward(ids, covariates, x)
 				test_loss += loss.item()
 		test_loss /= len(test_loader.dataset)
 		print('Test loss: {:.4f}'.format(test_loss))
@@ -501,11 +518,8 @@ class VAE(nn.Module):
 		covariates = covariates.to(self.device)
 		ids = item['subjid'].view(1)
 		ids = ids.to(self.device)
-		#try w/ view as well here
-		conv_task = item['conv_task'].view(1)
-		conv_task = conv_task.to(self.device)
 		with torch.no_grad():
-			_, _, imgs = self.forward(ids, conv_task, covariates, x, return_latent_rec = True)
+			_, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True)
 			for key in imgs.keys():
 				filename = 'recon_{}.nii'.format(key)
 				filepath = os.path.join(save_dir, filename)
