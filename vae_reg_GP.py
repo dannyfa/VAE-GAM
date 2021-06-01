@@ -30,7 +30,7 @@ from torch.optim import Adam
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
-from torch.distributions import LowRankMultivariateNormal, Normal, kl
+from torch.distributions import LowRankMultivariateNormal, MultivariateNormal, Normal, kl
 #uncomment if needing to chase-down a nan in loss
 #from torch import autograd
 from umap import UMAP
@@ -92,19 +92,13 @@ class VAE(nn.Module):
         self.max_ls = torch.as_tensor(10.0).to(self.device) #10 worked best empirically. See chckr replication folders on gungnir.
         self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
         #for task
-        self.xu_task = torch.linspace(-0.5, 2.5, self.inducing_pts).to(self.device)
-        self.gp_params['task']['xu'] = self.xu_task
-        self.Y_task = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
-        self.gp_params['task']['y'] = self.Y_task
-        self.logkvar_task = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
-        self.gp_params['task']['logkvar'] = self.logkvar_task
-        self.logls_task = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
-        self.gp_params['task']['log_ls'] = self.logls_task
+        #no params for actual GP --> this is a binary variable!!!
         self.linW_task = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), std= torch.tensor(1.0)).to(self.device))
         self.gp_params['task']['linW'] = self.linW_task
-		#Now same for 6 motion GPs
+		#Now init GP + lin params for other regressors (all of these are NOT binary)
+        #Ranges used are the ones for z-scored inputs.
 		#x trans
-        self.xu_x = torch.linspace(-0.2, 0.2, self.inducing_pts).to(self.device)
+        self.xu_x = torch.linspace(-4.00, 3.50, self.inducing_pts).to(self.device)
         self.gp_params['x']['xu'] = self.xu_x
         self.Y_x = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
         self.gp_params['x']['y'] = self.Y_x
@@ -116,7 +110,7 @@ class VAE(nn.Module):
         self.linW_x = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), std = torch.tensor(1.0)).to(self.device))
         self.gp_params['x']['linW'] = self.linW_x
         #y trans
-        self.xu_y = torch.linspace(-0.3, 0.4, self.inducing_pts).to(self.device)
+        self.xu_y = torch.linspace(-2.5, 3.42, self.inducing_pts).to(self.device)
         self.gp_params['y']['xu'] = self.xu_y
         self.Y_y = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
         self.gp_params['y']['y'] = self.Y_y
@@ -128,7 +122,7 @@ class VAE(nn.Module):
         self.linW_y = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), std = torch.tensor(1.0)).to(self.device))
         self.gp_params['y']['linW'] = self.linW_y
         #z trans
-        self.xu_z = torch.linspace(-0.4, 0.5, self.inducing_pts).to(self.device)
+        self.xu_z = torch.linspace(-3.45, 3.80, self.inducing_pts).to(self.device)
         self.gp_params['z']['xu'] = self.xu_z
         self.Y_z = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
         self.gp_params['z']['y'] = self.Y_z
@@ -141,7 +135,7 @@ class VAE(nn.Module):
         self.gp_params['z']['linW'] = self.linW_z
         #rotational ones
         #xrot
-        self.xu_xrot = torch.linspace(-0.007, 0.006, self.inducing_pts).to(self.device)
+        self.xu_xrot = torch.linspace(-3.31, 2.73, self.inducing_pts).to(self.device)
         self.gp_params['xrot']['xu'] = self.xu_xrot
         self.Y_xrot = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
         self.gp_params['xrot']['y'] = self.Y_xrot
@@ -153,7 +147,7 @@ class VAE(nn.Module):
         self.linW_xrot = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), std = torch.tensor(1.0)).to(self.device))
         self.gp_params['xrot']['linW'] = self.linW_xrot
         #yrot
-        self.xu_yrot = torch.linspace(-0.002, 0.003, self.inducing_pts).to(self.device)
+        self.xu_yrot = torch.linspace(-3.14, 4.76, self.inducing_pts).to(self.device)
         self.gp_params['yrot']['xu'] = self.xu_yrot
         self.Y_yrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
         self.gp_params['yrot']['y'] = self.Y_yrot
@@ -165,7 +159,7 @@ class VAE(nn.Module):
         self.linW_yrot = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), std = torch.tensor(1.0)).to(self.device))
         self.gp_params['yrot']['linW'] = self.linW_yrot
         #zrot
-        self.xu_zrot = torch.linspace(-0.003, 0.002, self.inducing_pts).to(self.device)
+        self.xu_zrot = torch.linspace(-3.03, 2.54, self.inducing_pts).to(self.device)
         self.gp_params['zrot']['xu'] = self.xu_zrot
         self.Y_zrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
         self.gp_params['zrot']['y'] = self.Y_zrot
@@ -300,29 +294,31 @@ class VAE(nn.Module):
             cov_oh = cov_oh.to(self.device).float()
             zcat = torch.cat([z, cov_oh], 1).float()
             diff = self.decode(zcat).view(x.shape[0], -1)
-            #get params for GP regressor
-            Xu = self.gp_params[gp_params_keys[i-1]]['xu']
-            Yu = self.gp_params[gp_params_keys[i-1]]['y']
-            #assert kvar is at least some small + number
-            #assert ls doesn't grow to infinity
-            #these will avoid issues with cholesky decomposition on gp module
-            kvar = (self.gp_params[gp_params_keys[i-1]]['logkvar']).exp() + 0.1
-            sig = nn.Sigmoid()
-            ls = self.max_ls * sig((self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5)
-            gp_regressor = gp.GP(Xu, Yu, kvar, ls)
             #get xqs, these are inputs for query pts
-            #effectively these are just values of covariates for a given batch
             xq = covariates[:, i-1]
-            #calc predictions for query points
-            y_q, y_vars = gp_regressor.predict(xq)
-            #calc marginal likelihood for gp
-            gp_mll = gp_regressor.calc_mll(Yu)
-            #add it to gp_loss term
-            gp_loss += gp_mll
+            y_q = torch.zeros(ids.shape[0]).to(self.device) #this will remain zero for binary variables!
+            if i!=1:
+                #get params for GP regressor
+                Xu = self.gp_params[gp_params_keys[i-1]]['xu']
+                Yu = self.gp_params[gp_params_keys[i-1]]['y']
+                #assert kvar is at least some small + number
+                #assert ls doesn't grow to infinity
+                #these will avoid issues with cholesky decomposition on gp module
+                kvar = (self.gp_params[gp_params_keys[i-1]]['logkvar']).exp() + 0.1
+                sig = nn.Sigmoid()
+                ls = self.max_ls * sig((self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5)
+                gp_regressor = gp.GP(Xu, Yu, kvar, ls)
+                #calc predictions for query points
+                y_q, y_vars = gp_regressor.predict(xq)
+                #calc marginal likelihood for gp
+                gp_mll = gp_regressor.calc_mll(Yu)
+                #add it to gp_loss term
+                gp_loss += gp_mll
             #scale covariate by lin weight, then add GP as an extra non-linearity.
             task_var = (self.gp_params[gp_params_keys[i-1]]['linW'] * covariates[:, i-1]) + y_q
-            ##implement HRF Option#2
-            ##if this is what we choose, will need to  make a cleaner version of the implementation below
+            #convolve FULL scaling factor w/ HRF
+            #this is done for biological regressors only
+            ##will need to  make a cleaner version of the implementation below
             if i ==1:
                 #if covariate is task...
                 #need to convolve (GP output + k * covariate) result with HRF
@@ -337,6 +333,7 @@ class VAE(nn.Module):
             cons = torch.einsum('b,bx->bx', task_var, diff)
             #add cons to init_task param if covariate == 'task'
             #implementation below was adopted to avoid in place ops that would cause autograd errors
+            #in future, this init piece will go away entirely
             if i==1:
                 cons = cons + self.task_init.unsqueeze(0).contiguous().view(1, -1).expand(ids.shape[0], -1)
             # am forcing l1 regularization on all maps (including motion ones)
@@ -403,6 +400,7 @@ class VAE(nn.Module):
         test_loss /= len(test_loader.dataset)
         print('Test loss: {:.4f}'.format(test_loss))
         return test_loss
+
     def save_state(self, filename):
         layers = self._get_layers()
         state = {}
@@ -420,9 +418,6 @@ class VAE(nn.Module):
         state['l1_scale'] = self.l1_scale
         #add GP nn params to checkpt files
         #this includes gp_params dict
-        state['Y_task'] = self.Y_task
-        state['logkvar_task'] = self.logkvar_task
-        state['logls_task'] = self.logls_task
         state['linW_task'] = self.linW_task
         state['Y_x'] = self.Y_x
         state['logkvar_x'] = self.logkvar_x
@@ -470,9 +465,6 @@ class VAE(nn.Module):
         self.l1_scale = checkpoint['l1_scale']
         #load in GP params from ckpt files
         #and load gp_params dict - needed here (otherwise only initial values are plotted!)
-        self.Y_task = checkpoint['Y_task']
-        self.logkvar_task = checkpoint['logkvar_task']
-        self.logls_task = checkpoint['logls_task']
         self.linW_task = checkpoint['linW_task']
         self.Y_x = checkpoint['Y_x']
         self.logkvar_x = checkpoint['logkvar_x']
@@ -501,7 +493,7 @@ class VAE(nn.Module):
         self.gp_params = checkpoint['gp_params']
         self.mll_scale = checkpoint['mll_scale']
         self.inducing_pts = checkpoint['inducing_pts']
-        
+
     def project_latent(self, loaders_dict, save_dir, title=None, split=98):
         # plotting only test set since this is un-shuffled.
         # Will plot by subjid in future to overcome this limitation
@@ -575,10 +567,9 @@ class VAE(nn.Module):
         ---------
         csv_file: file containing data for model
         this is the same used for data laoders
-        Will take only covariates from it though...
         """
         #create dict to hold covariate yq variances
-        keys = ['task', 'x_mot', 'y_mot', 'z_mot', 'pitch_mot', 'roll_mot', 'yaw_mot']
+        keys = ['x_mot', 'y_mot', 'z_mot', 'pitch_mot', 'roll_mot', 'yaw_mot']
         covariates_mean_vars = dict.fromkeys(keys)
         #setup output dir
         outdir_name = str(self.epoch).zfill(3) + '_GP_plots'
@@ -588,11 +579,11 @@ class VAE(nn.Module):
         #read in values for each regressor from csv_file
         #pass them to torch as a float tensor
         data = pd.read_csv(csv_file)
-        all_covariates = data[['task', 'x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']]
+        all_covariates = data[['x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']]
         all_covariates = all_covariates.to_numpy()
         all_covariates = torch.from_numpy(all_covariates)
         regressors = list(self.gp_params.keys())
-        for i in range(len(regressors)):
+        for i in range(1, len(regressors)): #skip task
             #create dict to hold all entries for each cov -- original input + predicted mean
             #and predicted vars for all points
             curr_cov = {};
@@ -605,7 +596,7 @@ class VAE(nn.Module):
             gp_regressor = gp.GP(xu, yu, kvar, ls)
             #get all xi's for regressor
             #get prediction
-            covariates = all_covariates[:, i]
+            covariates = all_covariates[:, i-1]
             xq = covariates.to(self.device)
             yq, yvar = gp_regressor.predict(xq)
             #add vals to covar dict
@@ -613,7 +604,7 @@ class VAE(nn.Module):
             curr_cov["mean"] = yq.detach().cpu().numpy().tolist()
             curr_cov["vars"] = yvar.detach().cpu().numpy().tolist()
             #save this dict
-            outfull_name = str(self.epoch).zfill(3) + '_GP_' + keys[i] + '_full.csv'
+            outfull_name = str(self.epoch).zfill(3) + '_GP_' + keys[i-1] + '_full.csv'
             covariate_full_data = pd.DataFrame.from_dict(curr_cov)
             #sort out predictions
             sorted_full_data = covariate_full_data.sort_values(by=["xq"])
@@ -622,7 +613,7 @@ class VAE(nn.Module):
             #calc variance of predicted GP mean
             #and pass it to dict
             yq_variance = torch.var(yq)
-            covariates_mean_vars[keys[i]] = [yq_variance.detach().cpu().numpy()]
+            covariates_mean_vars[keys[i-1]] = [yq_variance.detach().cpu().numpy()]
             #pass vars to cpu and np prior to plotting
             x_u = xu.detach().cpu().numpy()
             y_u = yu.detach().cpu().numpy()

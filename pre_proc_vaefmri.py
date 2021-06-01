@@ -97,7 +97,7 @@ raw_data_files = []
 raw_reg_files = []
 for i in range(len(subjs)):
     full_path = os.path.join(args.data_dir, subjs[i])
-    for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled_ALTERED_binary_large_3_1000_simple_ts_10_25_2020.nii.gz'):
+    for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled.nii.gz'):
         raw_data_files.append(str(data_file))
     for reg_file in Path(full_path).rglob('sub-A000*_ses-NFB2_task-CHECKERBOARD_acq-1400_desc-confounds_regressors.tsv'):
         raw_reg_files.append(str(reg_file))
@@ -204,6 +204,24 @@ def inverted_u(x_coords):
     y_coords = [ (x + 42.25)/42 for x in y_coords]
     return y_coords;
 
+def zscore(df):
+    '''
+    Takes a df with samples, zscores each one of the motion regressor colums
+    and replaces raw mot regressor inputs by their z-scored vals.
+    Z-scoring is done for ALL vols and subjects at once in this case.
+    Additionally, prints min and max for each z-scored column.
+    This is useful for properly adjusting GP inducing pt x ranges...
+    '''
+    mot_regrssors = df[['x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']]
+    cols = list(mot_regrssors.columns)
+    print('Computing zcores and min/max for motion cols:')
+    for col in cols:
+        col_zscore = col + '_zscored'
+        df[col] = (mot_regrssors[col] - mot_regrssors[col].mean())/mot_regrssors[col].std(ddof=0)
+        min, max = df[col].min(), df[col].max()
+        print('{}: min = {}; max = {}'.format(col_zscore, min, max))
+    return df
+
 #Building final csv file
 samples = []
 for i in raw_df['subjs']:
@@ -300,9 +318,10 @@ for i in raw_df['subjs']:
         trans_y[vol], trans_z[vol], rot_x[vol], rot_y[vol], \
         rot_z[vol])
         samples.append(sample)
-#and save df
-#name for saved file can also be made more flexible here ...
+
 new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", \
 "task_bin", "x", "y", "z", "rot_x", "rot_y", "rot_z"])
-save_path = os.path.join(args.save_dir, 'preproc_dset_ALTERED_binary_large_3_1000_simple_ts_10_25_2020.csv')
-new_df.to_csv(save_path)
+#z-score motion variables
+zscored_df = zscore(new_df)
+save_path = os.path.join(args.save_dir, 'preproc_dset_chckr_zscored_06012021.csv')
+zscored_df.to_csv(save_path)
