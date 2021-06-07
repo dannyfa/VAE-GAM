@@ -1,13 +1,13 @@
 """
 Module implementing 1D GP for regressors
 
-This is largely based on Jack's code & on the GP chapter in Kevin Murphy's textbook.
+This is largely based on Jack's code & on the notation for GP chapter in Kevin Murphy's textbook.
+It also follows closely ideas from original Rassmussen & William's text.
 
-- Added some extras to pass tensors to CUDA as needed
-- Got rid of observation noise (y_var) term
-- Added extra methods to calc covariance for prior over query points and to compute GP kl term --> used in joint objective
-- mll method still here --> NOT currently used... Will likely take it out
+- This implementation assumes some observation noise (with variance sigma_y)
+- Added extra methods to calc covariance for prior over query points and to compute GP kl term
 """
+
 import numpy as np
 import torch
 from torch.distributions import MultivariateNormal, kl
@@ -27,7 +27,6 @@ class GP():
         ls : float
         Lengthscale for Gaussian kernel. Trainable.
         """
-        #adding device attr
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device_name)
         #init attrs
@@ -37,10 +36,12 @@ class GP():
         self.Xu = Xu
         self.k_var = k_var
         self.ls = ls
+        #choose a val for observation noise variance. Am using 1e-3 here.
+        self.sigma_y = 1e-3
         # Calculate the Cholesky factor of the kernel matrix.
         k = _striped_matrix(self.n)
-        k = _distance_to_kernel(k, self.k_var, self.ls, self.step)
-        self.ky = k + 1e-4*torch.eye(self.n).to(self.device)
+        k = _distance_to_kernel(k, self.k_var, self.ls, self.sigma_y, self.step)
+        self.ky = k + 1e-4*torch.eye(self.n).to(self.device) #needed to add fudge diag factor of 1e-4 here as well... 
         self.k_chol = torch.cholesky(self.ky)
         self.alpha = torch.inverse(self.k_chol.transpose(0,1)) @ torch.inverse(self.k_chol) @ Yu.unsqueeze(1)
 
@@ -65,7 +66,7 @@ class GP():
         for j in range(n_q):
             dist = float(self.Xu[0] - X_q[j])
             k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
-        k_q = _distance_to_kernel(k_q, self.k_var, self.ls)
+        k_q = _distance_to_kernel(k_q, self.k_var, self.ls, self.sigma_y)
         mean = k_q.transpose(0,1) @ self.alpha
         v = torch.inverse(self.k_chol) @ k_q
         k_qq = torch.zeros((n_q,n_q)).to(self.device)
@@ -74,7 +75,7 @@ class GP():
                 dist = X_q[i] - X_q[j]
                 k_qq[i,j] = dist
                 k_qq[j,i] = dist
-        k_qq = _distance_to_kernel(k_qq, self.k_var, self.ls)
+        k_qq = _distance_to_kernel(k_qq, self.k_var, self.ls, self.sigma_y)
         covar = k_qq - v.transpose(0,1) @ v
         return mean.squeeze(1), covar
 
@@ -142,13 +143,13 @@ class GP():
         for j in range(n_q):
             dist = float(self.Xu[0] - X_q[j])
             k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
-        k_q = _distance_to_kernel(k_q, self.k_var, self.ls) #shape == 6x32
-        pu_cov = 10*torch.eye(6).to(self.device) #this is cov for prior over inducing pts
+        k_q = _distance_to_kernel(k_q, self.k_var, self.ls, self.sigma_y) #shape == 6x32, for 6 inducing pts and n=32 minibatch
+        pu_cov = 10*torch.eye(6).to(self.device) #this is cov for prior over inducing pts. Chose s0^2 == 10.
         #get Ku --> mat formed by evaluating kernel at each pair of inducing pts
         ku = _striped_matrix(self.n)
         ku = ku * self.step #this is dist mat between each pair of inducing pts
-        ku = _distance_to_kernel(ku, self.k_var, self.ls)
-        A = k_q.T @ torch.inverse(ku) #transpose here needed to make Knu (32x6) -- originally (6x32), Ku shape = 6x6
+        ku = _distance_to_kernel(ku, self.k_var, self.ls, self.sigma_y)
+        A = k_q.T @ torch.inverse(ku)
         Sigma_0 = A @ (pu_cov - ku) @ A.T
         return Sigma_0
 
@@ -169,32 +170,16 @@ class GP():
         Used Cholesky decomposition for better numerical stability when inverting/Using
         covariance matrices
         """
-        #get posterior mean and covariance
         fa, Sigma_a = self.evaluate_posterior(X_q)
         #set up 2 MV Gaussians
-        #am having issues with Chol decomposition here
-        #these mats are SINGULAR :(
-        #had to add some extra noise to diag of both Sigm_0 and Sigma_a for things to work...
-        #this is even when I kick out similar points :(
+        #and compute kl between them using torch's kl module
+        #had to add some a small 1e-4 factor to diag of both Sigm_0 and Sigma_a for things to work...
+        #otherwise, I get a chol decomposition error
         q_f = MultivariateNormal(fa, (Sigma_a + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
         p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), \
         (Sigma_0 + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
         gp_kl = kl.kl_divergence(p_f, q_f)
         return gp_kl
-
-        #version below is without using torch's module ...
-        #La = torch.cholesky(Sigma_a)
-        #L0 = torch.cholesky(Sigma_0)
-        #fa = fa.unsqueeze(1) #put this back into 32x1 shape
-        #now compute KL
-        #this follows Eqn 13 on App. # B
-        #each added line corresponds to a term on RHS of Eqn 13
-        #kl = 0.5 * (fa.T @ (torch.inverse(L0.transpose(0,1)) @ torch.inverse(L0)) @ fa)
-        #kl += 0.5 * (torch.trace((torch.inverse(L0) @ La) @ (torch.inverse(L0) @ La).T))
-        #kl += 0.5 * (torch.logdet(L0 @ L0.T))
-        #kl -= 0.5 * (torch.logdet(La @ La.T))
-        #kl -= M
-        #return kl[0][0]
 
 def _striped_matrix(n):
     """Make and n-by-n matrix with entries given by l1 distance to diagonal."""
@@ -204,7 +189,7 @@ def _striped_matrix(n):
         mat[range(0,n-i),range(i,n)] = i
     return mat
 
-def _distance_to_kernel(dist_mat, k_var, ls, scale_factor=1.0):
+def _distance_to_kernel(dist_mat, k_var, ls, sigma_y, scale_factor=1.0):
     """
     Map distance to Gaussian kernel similarity, elementwise.
     Parameters
@@ -218,4 +203,5 @@ def _distance_to_kernel(dist_mat, k_var, ls, scale_factor=1.0):
     scale_factor : float, optional
     Scale distances by this value. Defaults to `1.0`.
     """
-    return k_var * torch.exp(-torch.pow(scale_factor / np.sqrt(2) / ls * dist_mat, 2))
+    return (k_var * torch.exp(-torch.pow(scale_factor / np.sqrt(2) / ls * dist_mat, 2))) + \
+    sigma_y*torch.eye(dist_mat.shape[0], dist_mat.shape[1]).cuda()

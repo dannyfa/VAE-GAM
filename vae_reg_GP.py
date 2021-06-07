@@ -325,15 +325,15 @@ class VAE(nn.Module):
             item = xqs[i]
             for j in range(xqs.shape[0]):
                 diff = np.abs(item - xqs[j])
-                if i!=j and diff<= 5e-3:
+                if i!=j and diff<= 5e-4:
                     idx_to_delete.append(j)
         idx_to_delete = np.unique(np.array(idx_to_delete))
-        print(idx_to_delete)
+        #print(idx_to_delete)
         if idx_to_delete.size != 0:
             unique_xqs = torch.FloatTensor(np.delete(unique_xqs, idx_to_delete)).to(self.device)
         else:
             unique_xqs = torch.FloatTensor(xqs).to(self.device)
-        print(unique_xqs)
+        #print(unique_xqs)
         return unique_xqs, torch.FloatTensor(idx_to_delete).to(self.device)
 
     def get_replacement_sample(self, idx_replaced, xqs, unique_xqs, samples):
@@ -415,7 +415,7 @@ class VAE(nn.Module):
         x_rec = self.decode(zcat).view(x.shape[0], -1)
         imgs['base'] = x_rec.detach().cpu().numpy()
         for i in range(1,self.num_covariates+1):
-            print(i)
+            #print(i)
             cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
             dtype=torch.int64), self.num_covariates+1)
             cov_oh = cov_oh.to(self.device).float()
