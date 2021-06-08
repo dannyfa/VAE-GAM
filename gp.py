@@ -36,12 +36,12 @@ class GP():
         self.Xu = Xu
         self.k_var = k_var
         self.ls = ls
-        #choose a val for observation noise variance. Am using 1e-3 here.
+        #choose a val for observation noise variance.
         self.sigma_y = 1e-3
         # Calculate the Cholesky factor of the kernel matrix.
         k = _striped_matrix(self.n)
         k = _distance_to_kernel(k, self.k_var, self.ls, self.sigma_y, self.step)
-        self.ky = k + 1e-4*torch.eye(self.n).to(self.device) #needed to add fudge diag factor of 1e-4 here as well... 
+        self.ky = k + 1e-4*torch.eye(self.n).to(self.device) #needed to add fudge diag factor of 1e-4 here as well...
         self.k_chol = torch.cholesky(self.ky)
         self.alpha = torch.inverse(self.k_chol.transpose(0,1)) @ torch.inverse(self.k_chol) @ Yu.unsqueeze(1)
 
@@ -176,8 +176,7 @@ class GP():
         #had to add some a small 1e-4 factor to diag of both Sigm_0 and Sigma_a for things to work...
         #otherwise, I get a chol decomposition error
         q_f = MultivariateNormal(fa, (Sigma_a + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
-        p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), \
-        (Sigma_0 + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
+        p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), (Sigma_0 + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
         gp_kl = kl.kl_divergence(p_f, q_f)
         return gp_kl
 
