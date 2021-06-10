@@ -309,83 +309,91 @@ class VAE(nn.Module):
     #modules added to substitute too similar/redundant GP min-batch samples
     #these were causing issues with cholesky decompositions in GP module
 
-    def get_unique_xqs(self, xqs):
+    def get_neighbors_dict(self, xqs):
         """
-        Checks how close to each other samples of a given GP mini-batch are.
-        Cuts out samples that are <= 5e-4 apart from each other.
-        Returns:
-        new sample set --> containing unique enough samples only
-        idx_to_delete --> tensor with indexes of samples that were removed
+        Create dict with keys being xqs indeces and
+        entries being index for pt itself + for any other points
+        within a given rounding threshold of it.
         """
-        xqs = xqs.cpu().numpy()
-        unique_xqs = copy.deepcopy(xqs)
-        #identify entries to be removed (redundant)
-        idx_to_delete = []
+        neighbors = {}
+        xqs = xqs.detach().cpu().numpy()
         for i in range(xqs.shape[0]):
             item = xqs[i]
+            item_nn_idxs = [i] #add item itself to its nn list
             for j in range(xqs.shape[0]):
                 diff = np.abs(item - xqs[j])
-                if i!=j and diff<= 5e-4:
-                    idx_to_delete.append(j)
-        idx_to_delete = np.unique(np.array(idx_to_delete))
-        #print(idx_to_delete)
-        if idx_to_delete.size != 0:
-            unique_xqs = torch.FloatTensor(np.delete(unique_xqs, idx_to_delete)).to(self.device)
-        else:
-            unique_xqs = torch.FloatTensor(xqs).to(self.device)
-        #print(unique_xqs)
-        return unique_xqs, torch.FloatTensor(idx_to_delete).to(self.device)
+                if i!=j and diff <= 1e-3:
+                    item_nn_idxs.append(j)
+            neighbors[str(i)] = item_nn_idxs
+        return neighbors
 
-    def get_replacement_sample(self, idx_replaced, xqs, unique_xqs, samples):
+    def get_curated_samples(self, neighbors_dict, xqs):
         """
-        Gets y_q sample for pt that was cutoff.
-        Does so by using sample of closest unique pt as replacement.
+        Uses neighbors_dict to create another dict containing:
+        1) Curated Xq entries to be passed to GP.
+        This is either pt itself if entry has no neighbors OR
+        average of avaible neighbor points.
+        2) Number of neighbors for each unique entry. This will be used
+        to scale Sigma_0.
+        3) Unique_idxs: indeces for unique entries/pts
+        4) Deleted_idxs: indeces for entries that were considered redundant.
+        These are incorporated into average for a unique pt.
         """
-        item = xqs[idx_replaced]
-        diffs = []
-        for i in unique_xqs:
-            diff = np.abs(item - i)
-            diffs.append(diff)
-        min_diff_idx = np.argmin(np.array(diffs))
-        replacement_sample = samples[min_diff_idx]
-        return replacement_sample
-
-    def get_idx_to_keep(self, xqs_shape, idx_to_delete):
-        """
-        Creates tensor containing indexes for pts that were kept
-        in unique_xqs set.
-        This is useful when assembling tensor containing samples for entire batch.
-        """
-        idx_to_keep = []
-        for i in range(xqs_shape):
-            if i in idx_to_delete:
-                pass
+        xqs = xqs.detach().cpu().numpy()
+        means, nn_counts = [], []
+        unique_idxs, deleted_idxs, idxs_accounted_for = [], [], []
+        for i in range(len(list(neighbors_dict.keys()))):
+            if i not in idxs_accounted_for:
+                curr_nn = neighbors_dict[str(i)]
+                unique_idxs.append(i)
+                if len(curr_nn)==1:
+                    #pt has no neighbors
+                    means.append(xqs[curr_nn[0]])
+                    nn_counts.append(1.0)
+                    idxs_accounted_for.append(i)
+                else:
+                    #pt has neighbors
+                    means.append(np.mean(np.take(xqs, curr_nn)))
+                    nn_counts.append(len(curr_nn))
+                    idxs_accounted_for.extend(curr_nn)
             else:
-                idx_to_keep.append(i)
-        return torch.FloatTensor(np.array(idx_to_keep)).to(self.device)
+                deleted_idxs.append(i)
 
-    def get_all_samples(self, idx_to_delete, xqs, unique_xqs, samples):
+        curated_samples = {'mean': np.array(means), 'nn_counts': np.array(nn_counts), \
+        'unique_idxs': np.array(unique_idxs), 'deleted_idxs':np.array(deleted_idxs)}
+        return curated_samples
+
+
+    def get_replacement_sample(self, idx_replaced, neighbors_dict, unique_idxs, samples):
+        """
+        Gets replacement sample for a redundant input.
+        Essentially uses sample for corresponding unique component of
+        MV Gaussian as surrogate sample for the replaced/redundant pt.
+        """
+        replacement_set = neighbors_dict[str(idx_replaced)]
+        for i in replacement_set:
+            if i in unique_idxs:
+                replacement_sample = samples[np.where(unique_idxs==i)]
+                return replacement_sample
+
+    def get_all_samples(self, neighbors_dict, idxs_replaced, unique_idxs, samples):
         """
         Constructs y_q sample tensor.
-        For unique pts --> samples are obtained using GP module's rsample() method.
-        For non-unique/cut pts --> samples are obtained using get_replacement_sample
+        For unique pts/entries --> samples are obtained using GP module's rsample() method.
+        For non-unique/replaced pts --> samples are obtained using get_replacement_sample
         method.
         """
-        xqs, unique_xqs = xqs.cpu().numpy(), unique_xqs.cpu().numpy()
-        idx_to_delete = idx_to_delete.cpu().numpy().astype(int)
         samples = samples.detach().cpu().numpy()
         #get array w/ all replacement samples
         replaced_samples = []
-        for i in idx_to_delete:
-            replacement = self.get_replacement_sample(i, xqs, unique_xqs, samples)
+        for i in idxs_replaced:
+            replacement = self.get_replacement_sample(i, neighbors_dict, unique_idxs, samples)
             replaced_samples.append(replacement)
         replaced_samples = np.array(replaced_samples)
-        #get arr of idx to keep
-        idx_to_keep =  self.get_idx_to_keep(xqs.shape[0], idx_to_delete)
         #now create all samples arr
-        all_samples = np.zeros(xqs.shape[0])
-        np.put(all_samples, idx_to_delete, replaced_samples)
-        np.put(all_samples, idx_to_keep.cpu().numpy().astype(int), samples)
+        all_samples = np.zeros(len(list(neighbors_dict.keys())))
+        np.put(all_samples, idxs_replaced.astype(int), replaced_samples)
+        np.put(all_samples, unique_idxs.astype(int), samples)
         return torch.FloatTensor(all_samples).to(self.device)
 
 
@@ -426,7 +434,14 @@ class VAE(nn.Module):
             #get linear weights
             ma = Normal(self.gp_params[gp_params_keys[i-1]]['sa'], self.gp_params[gp_params_keys[i-1]]['va'])
             ka = ma.rsample()
-            y_q = torch.zeros(ids.shape[0]).to(self.device) #this will remain zero for binary variables!
+            #now compute lin term kl
+            #and add it to GP loss
+            gp_linW_kl = calc_linW_KL(self.gp_params[gp_params_keys[i-1]]['sa'], \
+            self.gp_params[gp_params_keys[i-1]]['va'])
+            gp_loss += gp_linW_kl
+            #set non-linear (GP term) to zeros
+            #this will remain zero for bin covariates... And will be updated for continuous ones.
+            y_q = torch.zeros(ids.shape[0]).to(self.device)
             if i!=1:
                 #get params for GP regressor
                 Xu = self.gp_params[gp_params_keys[i-1]]['xu']
@@ -436,24 +451,24 @@ class VAE(nn.Module):
                 #mk sure ls doesn't grow to infinity
                 sig = nn.Sigmoid()
                 ls = self.max_ls * sig((self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5)
+                #get curated xqs
+                neighbors_dict = self.get_neighbors_dict(xq)
+                curated_samples = self.get_curated_samples(neighbors_dict, xq)
+                #creat GP obj
                 gp_regressor = gp.GP(Xu, Yu, kvar, ls)
-                #get unique xqs and deleted indexes
-                unique_xq, idx_to_delete = self.get_unique_xqs(xq)
                 #get samples for unique pts
-                unique_samples = gp_regressor.rsample(unique_xq)
+                unique_samples = gp_regressor.rsample(torch.FloatTensor(curated_samples['mean']).to(self.device))
                 #get full sample set
-                y_q = self.get_all_samples(idx_to_delete, xq, unique_xq, unique_samples)
+                y_q = self.get_all_samples(neighbors_dict, curated_samples['deleted_idxs'], \
+                curated_samples['unique_idxs'], unique_samples)
                 #calc actual GP kl and add it to GP loss
-                sigma_0 = gp_regressor.calc_prior_cov(unique_xq)
-                gp_kl = gp_regressor.calc_GP_kl(unique_xq, sigma_0, self.inducing_pts)
+                sigma_0 = gp_regressor.calc_prior_cov(torch.FloatTensor(curated_samples['mean']).to(self.device), \
+                torch.FloatTensor(curated_samples['nn_counts']).to(self.device))
+                gp_kl = gp_regressor.calc_GP_kl(torch.FloatTensor(curated_samples['mean']).to(self.device), \
+                sigma_0, self.inducing_pts)
                 gp_loss += gp_kl
             #use linear weight + GP prediction to construct full scalling factor
             task_var = (ka * covariates[:, i-1]) + y_q
-            #now compute lin term kl
-            #and add it to GP loss
-            gp_linW_kl = calc_linW_KL(self.gp_params[gp_params_keys[i-1]]['sa'], \
-            self.gp_params[gp_params_keys[i-1]]['va'])
-            gp_loss += gp_linW_kl
             #convolve FULL scaling factor w/ HRF
             #this is done for biological regressors only
             ##will need to  make a cleaner version of the implementation below

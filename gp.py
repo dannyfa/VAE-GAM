@@ -41,7 +41,7 @@ class GP():
         # Calculate the Cholesky factor of the kernel matrix.
         k = _striped_matrix(self.n)
         k = _distance_to_kernel(k, self.k_var, self.ls, self.sigma_y, self.step)
-        self.ky = k + 1e-4*torch.eye(self.n).to(self.device) #needed to add fudge diag factor of 1e-4 here as well...
+        self.ky = k + 1e-4*torch.eye(self.n).to(self.device)
         self.k_chol = torch.cholesky(self.ky)
         self.alpha = torch.inverse(self.k_chol.transpose(0,1)) @ torch.inverse(self.k_chol) @ Yu.unsqueeze(1)
 
@@ -122,7 +122,7 @@ class GP():
         covar = covar + eps * torch.eye(covar.shape[0]).to(self.device)
         return MultivariateNormal(mean, covar).rsample()
 
-    def calc_prior_cov(self, X_q):
+    def calc_prior_cov(self, X_q, nn_counts):
         """
         Computes prior covariance matrix for query data points (Sigma_0)
         Using covariance for prior over inducing points, Ku and Knu -- as defined on Appendix # B
@@ -147,10 +147,14 @@ class GP():
         pu_cov = 10*torch.eye(6).to(self.device) #this is cov for prior over inducing pts. Chose s0^2 == 10.
         #get Ku --> mat formed by evaluating kernel at each pair of inducing pts
         ku = _striped_matrix(self.n)
-        ku = ku * self.step #this is dist mat between each pair of inducing pts
+        ku = ku * self.step
         ku = _distance_to_kernel(ku, self.k_var, self.ls, self.sigma_y)
         A = k_q.T @ torch.inverse(ku)
         Sigma_0 = A @ (pu_cov - ku) @ A.T
+        #now scale diagonal of Sigma_0 using # of samples per each entry pt in xq
+        orig_diag = torch.diagonal(Sigma_0)
+        weighted_diag = orig_diag * nn_counts
+        Sigma_0[range(len(Sigma_0)), range(len(Sigma_0))] = weighted_diag
         return Sigma_0
 
     def calc_GP_kl(self, X_q, Sigma_0, M):
@@ -176,7 +180,13 @@ class GP():
         #had to add some a small 1e-4 factor to diag of both Sigm_0 and Sigma_a for things to work...
         #otherwise, I get a chol decomposition error
         q_f = MultivariateNormal(fa, (Sigma_a + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
-        p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), (Sigma_0 + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
+        try:
+            p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), (Sigma_0 + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
+        except:
+            print('Failed to decompose Sigma_0!!')
+            torch.set_printoptions(threshold=10000)
+            print(Sigma_0)
+            print(torch.det(Sigma_0))
         gp_kl = kl.kl_divergence(p_f, q_f)
         return gp_kl
 
