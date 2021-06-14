@@ -1,19 +1,21 @@
 """
+
 Module implementing 1D GP for regressors
 
 This is largely based on Jack's code & on the notation for GP chapter in Kevin Murphy's textbook.
-It also follows closely ideas from original Rassmussen & William's text.
+It also follows closely ideas the original Rassmussen & William's text.
 
-- This implementation assumes some observation noise (with variance sigma_y)
-- Added extra methods to calc covariance for prior over query points and to compute GP kl term
+This implementation assumes some observation noise (with variance sigma_y)
+
 """
 
 import numpy as np
 import torch
 from torch.distributions import MultivariateNormal, kl
+import os, sys
 
 class GP():
-    """1D exact Gaussian Process w/ X-values on a grid and a Gaussian kernel."""
+    """1D Gaussian Process w/ X-values on a grid and a Gaussian kernel."""
     def __init__(self, Xu, Yu, k_var, ls):
         """
         Parameters
@@ -29,18 +31,18 @@ class GP():
         """
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device_name)
-        #init attrs
         self.n = Yu.shape[0]
         assert len(Xu) > 1
         self.step = Xu[1] - Xu[0]
         self.Xu = Xu
         self.k_var = k_var
         self.ls = ls
-        #choose a val for observation noise variance.
-        self.sigma_y = 1e-3
-        # Calculate the Cholesky factor of the kernel matrix.
+        self.Yu = Yu #added this for debudding. Not truly needed as an attr
+        self.sigma_y = 1e-3 #this is variance for observation noise
         k = _striped_matrix(self.n)
         k = _distance_to_kernel(k, self.k_var, self.ls, self.sigma_y, self.step)
+        #unsure if fudge factor of 1e-4 is still needed
+        #before observation noise was added in, this was needed to make model run stably
         self.ky = k + 1e-4*torch.eye(self.n).to(self.device)
         self.k_chol = torch.cholesky(self.ky)
         self.alpha = torch.inverse(self.k_chol.transpose(0,1)) @ torch.inverse(self.k_chol) @ Yu.unsqueeze(1)
@@ -99,9 +101,7 @@ class GP():
         return mean, torch.diag(covar) # diag necessary?
 
 
-    #am using this method on new GP implementation
-    #i.e., am taking actual samples vs. mean plug-in estimator
-    def rsample(self, X_q, eps=1e-6):
+    def rsample(self, X_q, covar_id, save_dir, eps=1e-6):
         """
         Sample from the posterior at the given query points.
 
@@ -120,73 +120,84 @@ class GP():
         """
         mean, covar = self.evaluate_posterior(X_q)
         covar = covar + eps * torch.eye(covar.shape[0]).to(self.device)
-        return MultivariateNormal(mean, covar).rsample()
+        #adding block below to catch cases where posterior cov becomes singular
+        #this happened once, but overall it is a very rare event
+        try:
+            m = MultivariateNormal(mean, covar)
+            return m.rsample()
+        except:
+            Sigma_a_det = torch.det(covar)
+            curr_GP = {}
+            curr_GP['Sigma_a'] = covar
+            curr_GP['Sigma_a_det'] = Sigma_a_det
+            curr_GP['ls'] = self.ls
+            curr_GP['kvar'] = self.k_var
+            curr_GP['Xu'] = self.Xu
+            curr_GP['Yu'] = self.Yu
+            curr_GP['Xqs'] = X_q.detach().cpu().numpy()
+            curr_GP['covar_id'] = covar_id
+            save_path = os.path.join(save_dir, 'NewGP_FixedSigma0_Diagnostics_{}.tar'.format(covar_id))
+            torch.save(curr_GP, save_path)
+            sys.exit()
 
-    def calc_prior_cov(self, X_q, nn_counts):
-        """
-        Computes prior covariance matrix for query data points (Sigma_0)
-        Using covariance for prior over inducing points, Ku and Knu -- as defined on Appendix # B
-        Parameters
-        ----------
-        X_q : torch.tensor
-        Query points.
+    #commented method and adopted a non-trainable (fixed) Sigma_0 instead
+    #Sigma_0 (prior over query pts) was singular and causing issues later on
+    #when computing kl for GP
 
-        Returns
-        -----------
-        Sigma_0: torch.tensor
-        Covariance Matrix for prior distribution over data (query) points
-        """
+    #def calc_prior_cov(self, X_q, nn_counts):
+    #    """
+    #    Computes prior covariance matrix for query data points (Sigma_0)
+    #    Using covariance for prior over inducing points, Ku and Knu -- as defined on Appendix # B
+    #    Parameters
+    #    ----------
+    #    X_q : torch.tensor
+    #    Query points.
+
+    #    Returns
+    #    -----------
+    #    Sigma_0: torch.tensor
+    #    Covariance Matrix for prior distribution over data (query) points
+    #    """
         #get Knu --> kernel distances between inducing pts and data points
-        n_q = X_q.shape[0]
-        k_q = torch.zeros((self.n, n_q)).to(self.device)
-        diff = self.step * self.n
-        for j in range(n_q):
-            dist = float(self.Xu[0] - X_q[j])
-            k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
-        k_q = _distance_to_kernel(k_q, self.k_var, self.ls, self.sigma_y) #shape == 6x32, for 6 inducing pts and n=32 minibatch
-        pu_cov = 10*torch.eye(6).to(self.device) #this is cov for prior over inducing pts. Chose s0^2 == 10.
+    #    n_q = X_q.shape[0]
+    #    k_q = torch.zeros((self.n, n_q)).to(self.device)
+    #    diff = self.step * self.n
+    #    for j in range(n_q):
+    #        dist = float(self.Xu[0] - X_q[j])
+    #        k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
+    #    k_q = _distance_to_kernel(k_q, self.k_var, self.ls, self.sigma_y) #shape == 6x32, for 6 inducing pts and n=32 minibatch
+    #    pu_cov = 10*torch.eye(6).to(self.device) #this is cov for prior over inducing pts. Chose s0^2 == 10.
         #get Ku --> mat formed by evaluating kernel at each pair of inducing pts
-        ku = _striped_matrix(self.n)
-        ku = ku * self.step
-        ku = _distance_to_kernel(ku, self.k_var, self.ls, self.sigma_y)
-        A = k_q.T @ torch.inverse(ku)
-        Sigma_0 = A @ (pu_cov - ku) @ A.T
-        #now scale diagonal of Sigma_0 using # of samples per each entry pt in xq
-        orig_diag = torch.diagonal(Sigma_0)
-        weighted_diag = orig_diag * nn_counts
-        Sigma_0[range(len(Sigma_0)), range(len(Sigma_0))] = weighted_diag
-        return Sigma_0
+    #    ku = _striped_matrix(self.n)
+    #    ku = ku * self.step
+    #    ku = _distance_to_kernel(ku, self.k_var, self.ls, self.sigma_y)
+    #    A = k_q.T @ torch.inverse(ku)
+    #    Sigma_0 = A @ (pu_cov - ku) @ A.T
+    #    return Sigma_0
 
-    def calc_GP_kl(self, X_q, Sigma_0, M):
+    def calc_GP_kl(self, X_q):
         """
-        Computes KL between GP prior and posterior
-        using closed-form for KL between 2 MV Gaussians
+        Computes KL between GP prior and posterior GPs
+        using closed-form for KL between 2 MV Gaussians.
+
         Parameters
         ------------
         X_q: torch.tensor
         Query points
-        Sigma_0: cov matrix for prior distribution over data pts
-        M: number of inducing pts
+        Assumes a non-trainable (fixed) prior over query pts.
 
         Returns
         -------------
         Kl divergence between prior and posterior GP distributions over data pts
-        Used Cholesky decomposition for better numerical stability when inverting/Using
-        covariance matrices
         """
+
         fa, Sigma_a = self.evaluate_posterior(X_q)
-        #set up 2 MV Gaussians
-        #and compute kl between them using torch's kl module
-        #had to add some a small 1e-4 factor to diag of both Sigm_0 and Sigma_a for things to work...
-        #otherwise, I get a chol decomposition error
+        #using a pre-set prior here... As opposed to a trainable one.
+        Sigma_0 = 1e-1*torch.eye(X_q.shape[0]).to(self.device)
+        #again unsure if 1e-4 fudge factor below is truly needed.
+        #in simulations I ran, it helps a ton in stabilizing things and allowing model to run stably
         q_f = MultivariateNormal(fa, (Sigma_a + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
-        try:
-            p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), (Sigma_0 + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
-        except:
-            print('Failed to decompose Sigma_0!!')
-            torch.set_printoptions(threshold=10000)
-            print(Sigma_0)
-            print(torch.det(Sigma_0))
+        p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), Sigma_0)
         gp_kl = kl.kl_divergence(p_f, q_f)
         return gp_kl
 
@@ -209,6 +220,9 @@ def _distance_to_kernel(dist_mat, k_var, ls, sigma_y, scale_factor=1.0):
     Vertical variance for Gaussian kernel.
     ls : float
     Lengthscale for Gaussian kernel.
+    sigma_y: obervation noise variance.
+    Added this here to account for potential noise in observations. I believe
+    this is ok, BUT plz check me!! 
     scale_factor : float, optional
     Scale distances by this value. Defaults to `1.0`.
     """

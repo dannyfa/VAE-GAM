@@ -109,7 +109,7 @@ class VAE(nn.Module):
         self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
         # max_ls term is used to avoid ls from blowing up.
         # I used 10 here but there is not much of a difference in output for reasonable values
-        self.max_ls = torch.as_tensor(10.0).to(self.device)
+        self.max_ls = torch.as_tensor(5.0).to(self.device)
 		#init params for GPs
 		#these are Xus (not trainable), Yu's, ls and kvar (trainable)
 		#pass these to a big dict -- i.e., gp_params
@@ -457,15 +457,12 @@ class VAE(nn.Module):
                 #creat GP obj
                 gp_regressor = gp.GP(Xu, Yu, kvar, ls)
                 #get samples for unique pts
-                unique_samples = gp_regressor.rsample(torch.FloatTensor(curated_samples['mean']).to(self.device))
+                unique_samples = gp_regressor.rsample(torch.FloatTensor(curated_samples['mean']).to(self.device), i, self.save_dir)
                 #get full sample set
                 y_q = self.get_all_samples(neighbors_dict, curated_samples['deleted_idxs'], \
                 curated_samples['unique_idxs'], unique_samples)
                 #calc actual GP kl and add it to GP loss
-                sigma_0 = gp_regressor.calc_prior_cov(torch.FloatTensor(curated_samples['mean']).to(self.device), \
-                torch.FloatTensor(curated_samples['nn_counts']).to(self.device))
-                gp_kl = gp_regressor.calc_GP_kl(torch.FloatTensor(curated_samples['mean']).to(self.device), \
-                sigma_0, self.inducing_pts)
+                gp_kl = gp_regressor.calc_GP_kl(torch.FloatTensor(curated_samples['mean']).to(self.device))
                 gp_loss += gp_kl
             #use linear weight + GP prediction to construct full scalling factor
             task_var = (ka * covariates[:, i-1]) + y_q
