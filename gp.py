@@ -2,19 +2,16 @@
 Module implementing 1D GP for regressors
 
 This is largely based on Jack's code & on the GP chapter in Kevin Murphy's textbook.
-
-- Added extra methods to calculate marginal likelihood for join training w/ VAE
-- Added some extras to pass tensors to CUDA as needed
-- Got rid of observation noise (y_var) term
 """
 
 import numpy as np
 import torch
 from torch.distributions import MultivariateNormal
+from torch import nn
 
 class GP():
     """1D exact Gaussian Process w/ X-values on a grid and a Gaussian kernel."""
-    def __init__(self, Xu, Yu, k_var, ls):
+    def __init__(self, Xu, Yu, log_kvar, log_ls, max_ls):
         """
         Parameters
         ----------
@@ -22,22 +19,22 @@ class GP():
         X values of inducing points.
         Yu : torch.Tensor
         Y values of inducing points. Trainable.
-        k_var : float
-        Vertical variance for Gaussian kernel. Trainable.
-        ls : float
-        Lengthscale for Gaussian kernel. Trainable.
+        log_kvar : float
+        Log of vertical variance for Gaussian kernel. Trainable.
+        log_ls : float
+        Log of lengthscale for Gaussian kernel. Trainable.
+        max_ls: float
+        Maximum value allowed for kernel length-scale.
         """
-        #adding device attr
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device_name)
-        #init attrs
         self.n = Yu.shape[0]
         assert len(Xu) > 1
         self.step = Xu[1] - Xu[0]
         self.Xu = Xu
-        self.k_var = k_var
-        self.ls = ls
-        # Calculate the Cholesky factor of the kernel matrix.
+        self.k_var = log_kvar.exp() + 0.1
+        sig = nn.Sigmoid()
+        self.ls = max_ls * sig(log_ls.exp() + 0.5)
         k = _striped_matrix(self.n)
         k = _distance_to_kernel(k, self.k_var, self.ls, self.step)
         self.ky = k + 1e-4*torch.eye(self.n).to(self.device)
@@ -98,8 +95,6 @@ class GP():
         mean, covar = self.evaluate_posterior(X_q)
         return mean, torch.diag(covar) # diag necessary?
 
-    #am not really using this method for now...
-    #ask Jack if needed??
     def rsample(self, X_q, eps=1e-6):
         """
         Sample from the posterior at the given query points.
@@ -122,12 +117,12 @@ class GP():
         return MultivariateNormal(mean, covar).rsample()
 
     def calc_mll(self, Yu):
-        #based on Murphy's book pp. 231
-        cte = torch.as_tensor((2*np.pi)).to(self.device)
-        a = (-0.5*torch.matmul(Yu.unsqueeze(-1).transpose(0,1), self.alpha)).squeeze(-1)
-        b = -0.5*torch.logdet(self.ky)
-        c = -0.5*self.n*torch.log(cte)
-        mll = a + b + c
+        #this method will be replaced by other methods used to compute KL
+        #between prior and posterior GP distributions
+        const = torch.as_tensor((2*np.pi)).to(self.device)
+        mll = (-0.5*torch.matmul(Yu.unsqueeze(-1).transpose(0,1), self.alpha)).squeeze(-1)
+        mll -= 0.5*torch.logdet(self.ky)
+        mll -= 0.5*self.n*torch.log(const)
         return mll
 
 def _striped_matrix(n):
