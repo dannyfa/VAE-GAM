@@ -10,17 +10,17 @@ Args:
 - Analysis directory: this is the same as --save_dir in the wrapper script
 - Model (a VAE-GP model object)
 - Cutoff: cutoff for yq variance value. Covariates with yq vars <= cutoff
-will be merged to base maps.
+will be merged to base map.
 
 Output:
-Writes new base maps to --save_dir under a new sub-directory
-named (/reconstructions/#epochs_avg_model_recons/post_processed).
-New base maps are created for both gran_avg maps (i.e., across subjects) and
-for subj_avg_maps.
-Also prints/writes:
-1) which covariates were merged to base
-2) which cutoff was used
-3) which GP summary file (named as, #epochs_GP_yq_variances.csv) was used
+Writes new base map to --save_dir under a new sub-directory
+named (/reconstructions/{#epochs}_avg_model_recons/post_processed).
+New base maps are created for both grand_avg maps (i.e., across subjects) and
+for signle-subj average maps.
+Also prints/writes to log:
+1) which covariates were merged to base.
+2) which cutoff was used.
+3) which GP summary file (named as, {#epochs}_GP_yq_variances.csv) was used.
 """
 
 import numpy as np
@@ -28,9 +28,6 @@ import nibabel as nib
 import os, sys
 import pandas as pd
 import datetime
-
-
-#define some useful helper functions first
 
 def _check_needed_maps (dir, needed_files_list):
     dir_contents = os.listdir(dir)
@@ -83,12 +80,12 @@ def _merge_maps(dir, covariates_to_merge):
 def run_postproc (model, analysis_dir, cutoff):
     #get num epochs from loaded/trained model
     epochs = str(model.epoch).zfill(3)
-    #get gP_summary_file path & mk sure it exists
+    #get GP_summary_file path & mk sure it exists
     gp_summary_path = os.path.join(analysis_dir, \
     (epochs + '_GP_plots'), (epochs + '_GP_yq_variances.csv'))
     if not os.path.exists(gp_summary_path):
         print("Could not find GP summary file for specified model/#epochs!")
-        print("Make sure to run model.plot_GPs prior to running zeroGPmeans routine")
+        print("Make sure to run model.plot_GPs prior to running post-processing routine.")
         sys.exit()
     print(40*'=')
     print("Using gp_summry file on: {}".format(gp_summary_path))
@@ -98,11 +95,9 @@ def run_postproc (model, analysis_dir, cutoff):
     (epochs + '_avg_model_recons'))
     if not os.path.exists(avg_recons_dir):
         print("Could not find directory containing avg reconstruction maps!")
-        print("Make sure to run build_model_recons prior to runnign zeroGPmeans routine")
+        print("Make sure to run build_model_recons prior to running post-processing routine")
         sys.exit()
     #check that all necessary files exist
-    #this has to be done both for gd_avg maps
-    #and subj level maps
     avg_dir_contents = os.listdir(avg_recons_dir)
     subjs = [i for i in avg_dir_contents if 'sub-A000' in i]
     needed_files = ['base', 'task', 'x_mot', 'y_mot', 'z_mot', \

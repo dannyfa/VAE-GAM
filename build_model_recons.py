@@ -1,5 +1,5 @@
 """
-Module to create model-based regressor, base and full-reconstruction maps.
+Module to create covariate, base and full-reconstruction maps.
 Creates:
 1) single subject volumes
 2) subject level avgs
@@ -39,7 +39,7 @@ def mk_single_volumes(dataset, model, csv_file, save_dir):
             if dset.iloc[idx, 1] == subjs[i]:
                 item = dataset.__getitem__(idx)
                 vol_num = dset.iloc[idx,2]
-                task_bin = dset.iloc[idx,7] #see if worth splitting volumes differently in future?
+                task_bin = dset.iloc[idx,7]
                 ext = 'vol'+ str(vol_num) + '_' + 'task' + str(task_bin)
                 filepath = os.path.join(subj_dir, ext)
                 os.makedirs(filepath)
@@ -50,7 +50,7 @@ def mk_single_volumes(dataset, model, csv_file, save_dir):
 def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
     """
     Creates model-based subj-level average and grand average reconstruction maps for
-    base, regressors and full reconstruction.
+    base, covariates and full reconstruction.
     Maps for motion regressors are ommitted unless otherwise specified.
     Args:
       csv_file :: csv with information on dataset.

@@ -4,9 +4,9 @@ VAE-GAM model module implementation.
 For more info on model please see our paper:
  https://www.biorxiv.org/content/10.1101/2021.04.04.438365v2.abstract
 
-Gaussian Procress regression implementation is contained separately in gp.py module.
+Gaussian Procress regression implementation is contained separately in the gp.py module.
 
-To train model, plot GPs or create brain maps use multsubj_reg_run.py.
+To train model, plot GPs or create brain maps use multsubj_reg_run.py as detailed in README.
 """
 
 import gp
@@ -33,7 +33,7 @@ IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
     def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = '', \
-    num_inducing_pts=6, mll_scale=10.0, l1_scale=1.0):
+    num_inducing_pts=6, mll_scale=10.0, l1_scale=1.0, csv_file=''):
         super(VAE, self).__init__()
         self.nf = nf
         self.save_dir = save_dir
@@ -67,7 +67,7 @@ class VAE(nn.Module):
         #As it might help avoid our posterior GP cov from failing psd.
         self.max_ls = torch.as_tensor(10.0).to(self.device)
         #construct gp_params dict and init variable vals
-        self.gp_params  = utils.build_gp_params_dict(self.inducing_pts, self.device)
+        self.gp_params  = utils.build_gp_params_dict(self.inducing_pts, self.device, csv_file)
         # init prior over z's
         mean = torch.zeros(self.num_latents).to(self.device)
         cov_factor = torch.zeros(self.num_latents).unsqueeze(-1).to(self.device)
@@ -259,7 +259,7 @@ class VAE(nn.Module):
             #convolve this result with HRF
             #this is done for biological regressors only!
             if i ==1:
-                task_var = utils.hrf_convolve(task_var).to(self.device)
+                task_var = torch.FloatTensor(utils.hrf_convolve(task_var)).to(self.device)
             #now use this result to scale effect map
             cons = torch.einsum('b,bx->bx', task_var, diff)
             #for task covariate, use GLM initialization.
