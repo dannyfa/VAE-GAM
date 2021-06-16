@@ -1,7 +1,7 @@
 """
 Short script to create avg SPM GLM stat map (for comparison) &
 avg beta SPM map (for init in model).
-Does so for checker effect (#1) and checker>fixation (#4)
+Does so for checker effect (#1) and checker>fixation (#4).
 """
 
 import os, sys
@@ -10,17 +10,54 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 import argparse
+from build_model_recons import _save_map
 
 parser = argparse.ArgumentParser(description='args for calc SPM GLM avgs')
 
 parser.add_argument('--data_dir', type=str, metavar='N', default='', \
-help='Root dir where subj SPM GLM beta and stat maps are.')
+help='Root dir where GLM beta and stat maps are.')
 parser.add_argument('--save_dir', type=str, metavar='N', default='', \
 help='Dir to write out output avg maps.')
 parser.add_argument('--ref_nii', type=str, metavar='N', default='', \
 help='Ref nii from which hdr and affine are taken. Can be fmriprep pre-processed file from any subj.')
 
 args = parser.parse_args()
+
+def _get_maps(subjs, data_dir, map_type):
+    """
+    Creates a dict of dicts holding the different stat maps for each subject in subjs.
+    Args
+    ----
+    subjs: list containing identifiers for subjects to be included.
+    data_dir: root directory where results for GLM analyses for these subjects lives.
+    Specific path here was hardcoded to represent set-up in our system/machine.
+    However, user might wish to adapt it so that it matches their own system.
+    map_type: str.
+    Can be either 'stat' or 'beta', referring to either raw beta map output from GLM
+    or maps resulting from computing stats on top of these maps.
+    """
+    if map_type == 'stat':
+        file_pattern = 'thresh_zstat*.nii.gz'
+    else:
+        file_pattern = 'cope*.nii.gz'
+    all_maps = {}
+    for i in range(len(subjs)):
+        subj_cons = {'cons1':{}, 'cons2':{}, 'cons3':{}, 'cons4':{}, 'cons5':{}}
+        #path below was specific for set up on our machines. You might need to adjust it
+        #so that it points to correct location in your system.
+        full_path = os.path.join(data_dir, subjs[i],'ses-NFB2', 'func', \
+        '{}_task-preproc_bold_brainmasked_resampled_corrected.feat'.format(subjs[i]))
+        for f in Path(full_path).rglob(file_pattern):
+            map_path = str(f)
+            num = re.findall(r'\d+', map_path)[-1]
+            map = np.array(nib.load(map_path).dataobj)
+            key = 'cons{}'.format(num)
+            try:
+                subj_cons[key] = map
+            except:
+                pass
+        all_maps[subjs[i]] = subj_cons
+    return all_maps
 
 #setting up data_dir
 if args.data_dir=='':
@@ -40,12 +77,9 @@ else:
     else:
         pass
 
-# get ref nifti
-input_nifti = nib.load(args.ref_nii)
-
 #get subjIDs
 #excluded sub-A00058952 due to high voxel intensity vals
-RE = re.compile('\Asub-A000*') #regex for finding subjIDs
+RE = re.compile('\Asub-A000*')
 dirs = os.listdir(args.data_dir)
 subjs = []
 for i in range(len(dirs)):
@@ -55,45 +89,12 @@ for i in range(len(dirs)):
         else:
             subjs.append(dirs[i])
 
-#get stat_maps and beta_maps for all subj
-stat_maps = {}
-beta_maps = {}
-
-for i in range(len(subjs)):
-    subj_stats = {'cons1':{}, 'cons2':{}, 'cons3':{}, 'cons4':{}, 'cons5':{}}
-    full_path = os.path.join(args.data_dir, subjs[i],'ses-NFB2', 'func', \
-    '{}_task-preproc_bold_brainmasked_resampled_corrected.feat'.format(subjs[i]))
-    #get stat maps
-    for stat_map in Path(full_path).rglob('thresh_zstat*.nii.gz'):
-        stat_path = str(stat_map)
-        num = re.findall(r'\d+', stat_path)[-1]
-        stat_map = np.array(nib.load(stat_path).dataobj)
-        key = 'cons{}'.format(num)
-        try:
-            subj_stats[key] = stat_map
-        except:
-            pass
-    stat_maps[subjs[i]] = subj_stats
-
-for i in range(len(subjs)):
-    subj_betas = {'cons1':{}, 'cons2':{}, 'cons3':{}, 'cons4':{}, 'cons5':{}}
-    full_path = os.path.join(args.data_dir, subjs[i],'ses-NFB2', 'func', \
-    '{}_task-preproc_bold_brainmasked_resampled_corrected.feat'.format(subjs[i]))
-    #get beta maps
-    for cope_file in Path(full_path).rglob('cope*.nii.gz'):
-        beta_path = str(cope_file)
-        num = re.findall(r'\d+', beta_path)[-1]
-        beta_map =  np.array(nib.load(beta_path).dataobj)
-        key = 'cons{}'.format(num)
-        try:
-            subj_betas[key] = beta_map
-        except:
-            pass
-    beta_maps[subjs[i]] = subj_betas
+#get needed stat and beta maps
+stat_maps = _get_maps(subjs, args.data_dir, 'stat')
+beta_maps = _get_maps(subjs, args.data_dir, 'beta')
 
 #now compute avg_maps
-#loop through num of contrasts/conditions
-for i in range (1,6):
+for i in range (1,6): #range chosen based on number of contrasts, conditions for chcker GLM analysis.
     gd_stat_map = np.zeros((41, 49, 35), dtype=np.float32)
     gd_beta_map = np.zeros((41, 49, 35), dtype=np.float32)
     name = 'cons{}'.format(i)
@@ -103,11 +104,6 @@ for i in range (1,6):
     #div though len subjs...
     gd_stat_map = gd_stat_map/len(subjs)
     gd_beta_map = gd_beta_map/len(subjs)
-    #create nii objs
-    gd_stat_map_nii =  nib.Nifti1Image(gd_stat_map, input_nifti.affine, input_nifti.header)
-    gd_beta_map_nii =  nib.Nifti1Image(gd_beta_map, input_nifti.affine, input_nifti.header)
-    #write outputs
-    stat_out_path = os.path.join(args.save_dir, 'avg_zstat_{}.nii'.format(name))
-    nib.save(gd_stat_map_nii, stat_out_path)
-    beta_out_path = os.path.join(args.save_dir, 'avg_beta_{}.nii'.format(name))
-    nib.save(gd_beta_map_nii, beta_out_path)
+    #save maps
+    _save_map(gd_stat_map, args.ref_nii, args.save_dir, 'zstat_{}'.format(name))
+    _save_map(gd_beta_map, args.ref_nii, args.save_dir, 'beta_{}'.format(name))
