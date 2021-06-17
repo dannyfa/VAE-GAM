@@ -5,8 +5,6 @@ Module implementing 1D GP for regressors
 This is largely based on Jack's code & on the notation for GP chapter in Kevin Murphy's textbook.
 It also follows closely ideas the original Rassmussen & William's text.
 
-This implementation assumes some observation noise (with variance sigma_y)
-
 """
 
 import numpy as np
@@ -38,9 +36,8 @@ class GP():
         self.k_var = k_var
         self.ls = ls
         self.Yu = Yu #added this for debudding. Not truly needed as an attr
-        self.sigma_y = 1e-3 #this is variance for observation noise
         k = _striped_matrix(self.n)
-        k = _distance_to_kernel(k, self.k_var, self.ls, self.sigma_y, self.step)
+        k = _distance_to_kernel(k, self.k_var, self.ls, self.step)
         #unsure if fudge factor of 1e-4 is still needed
         #before observation noise was added in, this was needed to make model run stably
         self.ky = k + 1e-4*torch.eye(self.n).to(self.device)
@@ -68,7 +65,7 @@ class GP():
         for j in range(n_q):
             dist = float(self.Xu[0] - X_q[j])
             k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
-        k_q = _distance_to_kernel(k_q, self.k_var, self.ls, self.sigma_y)
+        k_q = _distance_to_kernel(k_q, self.k_var, self.ls)
         mean = k_q.transpose(0,1) @ self.alpha
         v = torch.inverse(self.k_chol) @ k_q
         k_qq = torch.zeros((n_q,n_q)).to(self.device)
@@ -77,7 +74,7 @@ class GP():
                 dist = X_q[i] - X_q[j]
                 k_qq[i,j] = dist
                 k_qq[j,i] = dist
-        k_qq = _distance_to_kernel(k_qq, self.k_var, self.ls, self.sigma_y)
+        k_qq = _distance_to_kernel(k_qq, self.k_var, self.ls)
         covar = k_qq - v.transpose(0,1) @ v
         return mean.squeeze(1), covar
 
@@ -101,7 +98,7 @@ class GP():
         return mean, torch.diag(covar) # diag necessary?
 
 
-    def rsample(self, X_q, covar_id, save_dir, eps=1e-6):
+    def rsample(self, X_q, covar_id, save_dir, eps=1e-4):
         """
         Sample from the posterior at the given query points.
 
@@ -122,23 +119,8 @@ class GP():
         covar = covar + eps * torch.eye(covar.shape[0]).to(self.device)
         #adding block below to catch cases where posterior cov becomes singular
         #this happened once, but overall it is a very rare event
-        try:
-            m = MultivariateNormal(mean, covar)
-            return m.rsample()
-        except:
-            Sigma_a_det = torch.det(covar)
-            curr_GP = {}
-            curr_GP['Sigma_a'] = covar
-            curr_GP['Sigma_a_det'] = Sigma_a_det
-            curr_GP['ls'] = self.ls
-            curr_GP['kvar'] = self.k_var
-            curr_GP['Xu'] = self.Xu
-            curr_GP['Yu'] = self.Yu
-            curr_GP['Xqs'] = X_q.detach().cpu().numpy()
-            curr_GP['covar_id'] = covar_id
-            save_path = os.path.join(save_dir, 'NewGP_FixedSigma0_Diagnostics_{}.tar'.format(covar_id))
-            torch.save(curr_GP, save_path)
-            sys.exit()
+        m = MultivariateNormal(mean, covar)
+        return m.rsample()
 
     #commented method and adopted a non-trainable (fixed) Sigma_0 instead
     #Sigma_0 (prior over query pts) was singular and causing issues later on
@@ -209,7 +191,7 @@ def _striped_matrix(n):
         mat[range(0,n-i),range(i,n)] = i
     return mat
 
-def _distance_to_kernel(dist_mat, k_var, ls, sigma_y, scale_factor=1.0):
+def _distance_to_kernel(dist_mat, k_var, ls, scale_factor=1.0):
     """
     Map distance to Gaussian kernel similarity, elementwise.
     Parameters
@@ -220,11 +202,7 @@ def _distance_to_kernel(dist_mat, k_var, ls, sigma_y, scale_factor=1.0):
     Vertical variance for Gaussian kernel.
     ls : float
     Lengthscale for Gaussian kernel.
-    sigma_y: obervation noise variance.
-    Added this here to account for potential noise in observations. I believe
-    this is ok, BUT plz check me!! 
     scale_factor : float, optional
     Scale distances by this value. Defaults to `1.0`.
     """
-    return (k_var * torch.exp(-torch.pow(scale_factor / np.sqrt(2) / ls * dist_mat, 2))) + \
-    sigma_y*torch.eye(dist_mat.shape[0], dist_mat.shape[1]).cuda()
+    return (k_var * torch.exp(-torch.pow(scale_factor / np.sqrt(2) / ls * dist_mat, 2)))
