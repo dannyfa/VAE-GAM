@@ -62,35 +62,35 @@ def get_xu_ranges(csv_file, eps = 1e-2):
         xu_ranges.append([(min-eps), (max+eps)])
     return xu_ranges
 
-def build_gp_params_dict(num_inducing_pts, device, csv_file):
-    """
-    Construct gp_params dict to hold linear weight + GP parameters
-    (i.e., x's and y's for inducible points, kernel lengthscale and verticle variance)
-    for each covariate.
-    Args
-    -----
-    num_inducing_pts: Int.
-    Number of inducing points to be used in each 1D GP.
-    """
-    gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, \
-    'xrot':{}, 'yrot':{}, 'zrot':{}}
-    keys = list(gp_params.keys())
-    subkeys = ['linW', 'xu', 'y', 'logkvar', 'log_ls']
-    xu_ranges = get_xu_ranges(csv_file)
-    for i in range(len(keys)):
-            for j in subkeys:
-                if j=='linW':
-                    gp_params[keys[i]][j] = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0),\
-                    std = torch.tensor(1.0)).to(device))
-                if i!=0: #skip rest of gp params for task, which is binary variable
-                    if j=='xu':
-                        gp_params[keys[i]][j] = torch.linspace(xu_ranges[i-1][0], xu_ranges[i-1][1], \
-                        num_inducing_pts).to(device)
-                    elif j=='y':
-                        gp_params[keys[i]][j] = torch.nn.Parameter(torch.rand(num_inducing_pts).to(device))
-                    else:
-                        gp_params[keys[i]][j] = torch.nn.Parameter(torch.as_tensor((0.0)).to(device))
-    return gp_params
+#def build_gp_params_dict(num_inducing_pts, device, csv_file):
+#    """
+#    Construct gp_params dict to hold linear weight + GP parameters
+#    (i.e., x's and y's for inducible points, kernel lengthscale and verticle variance)
+#    for each covariate.
+#    Args
+#    -----
+#    num_inducing_pts: Int.
+#    Number of inducing points to be used in each 1D GP.
+#    """
+#    gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, \
+#    'xrot':{}, 'yrot':{}, 'zrot':{}}
+#    keys = list(gp_params.keys())
+#    subkeys = ['linW', 'xu', 'y', 'logkvar', 'log_ls']
+#    xu_ranges = get_xu_ranges(csv_file)
+#    for i in range(len(keys)):
+#            for j in subkeys:
+#                if j=='linW':
+#                    gp_params[keys[i]][j] = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0),\
+#                    std = torch.tensor(1.0)).to(device))
+#                if i!=0: #skip rest of gp params for task, which is binary variable
+#                    if j=='xu':
+#                        gp_params[keys[i]][j] = torch.linspace(xu_ranges[i-1][0], xu_ranges[i-1][1], \
+#                        num_inducing_pts).to(device)
+#                    elif j=='y':
+#                        gp_params[keys[i]][j] = torch.nn.Parameter(torch.rand(num_inducing_pts).to(device))
+#                    else:
+#                        gp_params[keys[i]][j] = torch.nn.Parameter(torch.as_tensor((0.0)).to(device))
+#    return gp_params
 
 def str2bool(v):
     """

@@ -67,7 +67,86 @@ class VAE(nn.Module):
         #As it might help avoid our posterior GP cov from failing psd.
         self.max_ls = torch.as_tensor(10.0).to(self.device)
         #construct gp_params dict and init variable vals
-        self.gp_params  = utils.build_gp_params_dict(self.inducing_pts, self.device, csv_file)
+        xu_ranges = utils.get_xu_ranges(csv_file) #get cov ranges for GP x grid
+        #now init GP params and put them on dict
+        self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
+        #for task
+        self.linW_task = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), \
+        std= torch.tensor(1.0)).to(self.device))
+        self.gp_params['task']['linW'] = self.linW_task
+        #for mot variables
+        #x
+        self.linW_x = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), \
+        std = torch.tensor(1.0)).to(self.device))
+        self.gp_params['x']['linW'] = self.linW_x
+        self.xu_x = torch.linspace(xu_ranges[0][0], xu_ranges[0][1], self.inducing_pts).to(self.device)
+        self.gp_params['x']['xu'] = self.xu_x
+        self.Y_x = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
+        self.gp_params['x']['y'] = self.Y_x
+        self.logkvar_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['x']['logkvar'] = self.logkvar_x
+        self.logls_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['x']['log_ls'] = self.logls_x
+        #y
+        self.linW_y = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), \
+        std = torch.tensor(1.0)).to(self.device))
+        self.gp_params['y']['linW'] = self.linW_y
+        self.xu_y = torch.linspace(xu_ranges[1][0], xu_ranges[1][1], self.inducing_pts).to(self.device)
+        self.gp_params['y']['xu'] = self.xu_y
+        self.Y_y = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
+        self.gp_params['y']['y'] = self.Y_y
+        self.logkvar_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['y']['logkvar'] = self.logkvar_y
+        self.logls_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['y']['log_ls'] = self.logls_y
+        #z
+        self.linW_z = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), \
+        std = torch.tensor(1.0)).to(self.device))
+        self.gp_params['z']['linW'] = self.linW_z
+        self.xu_z = torch.linspace(xu_ranges[2][0], xu_ranges[2][1], self.inducing_pts).to(self.device)
+        self.gp_params['z']['xu'] = self.xu_z
+        self.Y_z = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
+        self.gp_params['z']['y'] = self.Y_z
+        self.logkvar_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['z']['logkvar'] = self.logkvar_z
+        self.logls_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['z']['log_ls'] = self.logls_z
+        #x_rot
+        self.linW_xrot = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), \
+        std = torch.tensor(1.0)).to(self.device))
+        self.gp_params['xrot']['linW'] = self.linW_xrot
+        self.xu_xrot = torch.linspace(xu_ranges[3][0], xu_ranges[3][1], self.inducing_pts).to(self.device)
+        self.gp_params['xrot']['xu'] = self.xu_xrot
+        self.Y_xrot = torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
+        self.gp_params['xrot']['y'] = self.Y_xrot
+        self.logkvar_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['xrot']['logkvar'] = self.logkvar_xrot
+        self.logls_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['xrot']['log_ls'] = self.logls_xrot
+        #y_rot
+        self.linW_yrot = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), \
+        std = torch.tensor(1.0)).to(self.device))
+        self.gp_params['yrot']['linW'] = self.linW_yrot
+        self.xu_yrot = torch.linspace(xu_ranges[4][0], xu_ranges[4][1], self.inducing_pts).to(self.device)
+        self.gp_params['yrot']['xu'] = self.xu_yrot
+        self.Y_yrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
+        self.gp_params['yrot']['y'] = self.Y_yrot
+        self.logkvar_yrot = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['yrot']['logkvar'] = self.logkvar_yrot
+        self.logls_yrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['yrot']['log_ls'] = self.logls_yrot
+        #z_rot
+        self.linW_zrot = torch.nn.Parameter(torch.normal(mean = torch.tensor(0.0), \
+        std = torch.tensor(1.0)).to(self.device))
+        self.gp_params['zrot']['linW'] = self.linW_zrot
+        self.xu_zrot = torch.linspace(xu_ranges[5][0], xu_ranges[5][1], self.inducing_pts).to(self.device)
+        self.gp_params['zrot']['xu'] = self.xu_zrot
+        self.Y_zrot= torch.nn.Parameter(torch.rand(self.inducing_pts).to(self.device))
+        self.gp_params['zrot']['y'] = self.Y_zrot
+        self.logkvar_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['zrot']['logkvar'] = self.logkvar_zrot
+        self.logls_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.gp_params['zrot']['log_ls'] = self.logls_zrot
         # init prior over z's
         mean = torch.zeros(self.num_latents).to(self.device)
         cov_factor = torch.zeros(self.num_latents).unsqueeze(-1).to(self.device)
@@ -352,6 +431,31 @@ class VAE(nn.Module):
         self.mll_scale = checkpoint['mll_scale']
         self.inducing_pts = checkpoint['inducing_pts']
         self.gp_params = checkpoint['gp_params']
+        self.linW_task = self.gp_params['task']['linW']
+        self.linW_x = self.gp_params['x']['linW']
+        self.Y_x = self.gp_params['x']['y']
+        self.logkvar_x = self.gp_params['x']['logkvar']
+        self.logls_x = self.gp_params['x']['log_ls']
+        self.linW_y = self.gp_params['y']['linW']
+        self.Y_y = self.gp_params['y']['y']
+        self.logkvar_y = self.gp_params['y']['logkvar']
+        self.logls_y = self.gp_params['y']['log_ls']
+        self.linW_z = self.gp_params['z']['linW']
+        self.Y_z = self.gp_params['z']['y']
+        self.logkvar_z = self.gp_params['z']['logkvar']
+        self.logls_z = self.gp_params['z']['log_ls']
+        self.linW_xrot = self.gp_params['xrot']['linW']
+        self.Y_xrot = self.gp_params['xrot']['y']
+        self.logkvar_xrot = self.gp_params['xrot']['logkvar']
+        self.logls_xrot = self.gp_params['xrot']['log_ls']
+        self.linW_yrot = self.gp_params['yrot']['linW']
+        self.Y_yrot = self.gp_params['yrot']['y']
+        self.logkvar_yrot = self.gp_params['yrot']['logkvar']
+        self.logls_yrot = self.gp_params['yrot']['log_ls']
+        self.linW_zrot = self.gp_params['zrot']['linW']
+        self.Y_zrot = self.gp_params['zrot']['y']
+        self.logkvar_zrot = self.gp_params['zrot']['logkvar']
+        self.logls_zrot = self.gp_params['zrot']['log_ls']
 
     def project_latent(self, loaders_dict, save_dir, title=None, split=98):
         filename = str(self.epoch).zfill(3) + '_temp.pdf'
