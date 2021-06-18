@@ -410,6 +410,7 @@ class VAE(nn.Module):
         state['l1_scale'] = self.l1_scale
         state['mll_scale'] = self.mll_scale
         state['inducing_pts'] = self.inducing_pts
+        state['max_ls'] = self.max_ls
         state['gp_params'] = self.gp_params
         filename = os.path.join(self.save_dir, filename)
         torch.save(state, filename)
@@ -430,6 +431,7 @@ class VAE(nn.Module):
         self.l1_scale = checkpoint['l1_scale']
         self.mll_scale = checkpoint['mll_scale']
         self.inducing_pts = checkpoint['inducing_pts']
+        self.max_ls = checkpoint['max_ls']
         self.gp_params = checkpoint['gp_params']
         self.linW_task = self.gp_params['task']['linW']
         self.linW_x = self.gp_params['x']['linW']
