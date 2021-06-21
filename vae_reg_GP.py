@@ -59,28 +59,29 @@ def hrf(times):
 
 #am also defining linW KL computing function here
 #this will also be imported through a separate module
-def calc_linW_KL(sa, va):
+def calc_linW_KL(sa, va, k_prior):
     """
     Computes KL for linear weight term (kappa_\alpha)
     This term is added to KL stemming from GP itself, to yield a total GP
     contribution to the VAE-GAM objective.
     Args:
-    sa --> posterior mean
-    va --> posterior std
+    sa --> posterior mean.
+    va --> posterior std.
+    k_prior --> prior on kappas.
     Outputs:
     KL between prior (N(0,1)) and posterior (N(sa, va^2))
-    This is computed as in the first term of Eqn 9 of Appendix B.
     """
-    kl = 0.5 * ((1/torch.pow(va,2)) + (torch.pow(sa, 2)/torch.pow(va,2)) + \
-    torch.log(torch.pow(va,2)))
-    return kl
+    q_k = Normal(sa, va)
+    linW_kl = kl.kl_divergence(q_k, k_prior)
+    return linW_kl
 
 # maintained shape of original nn by downsampling data on preprocessing
 IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = '', num_inducing_pts=6, mll_scale=10.0, l1_scale=1.0):
+    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = '', \
+    num_inducing_pts=6, mll_scale=10.0, l1_scale=1.0):
         super(VAE, self).__init__()
         self.nf = nf
         self.save_dir = save_dir
@@ -108,110 +109,118 @@ class VAE(nn.Module):
         self.inducing_pts = num_inducing_pts
         self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
         # max_ls term is used to avoid ls from blowing up.
-        # I used 10 here but there is not much of a difference in output for reasonable values
         self.max_ls = torch.as_tensor(3.0).to(self.device)
+        #set prior for inducing pts
+        self.pu = MultivariateNormal(torch.zeros(self.inducing_pts).to(self.device), \
+        10*torch.eye(self.inducing_pts).to(self.device))
+        #set prior for kappas
+        self.k_prior = Normal(torch.tensor([0.0]).to(self.device), \
+        torch.tensor([1.0]).to(self.device))
 		#init params for GPs
-		#these are Xus (not trainable), Yu's, ls and kvar (trainable)
-		#pass these to a big dict -- i.e., gp_params
         self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
-        #set prior for Yu's
-        #will init Yu's by sampling from this dist.
-        #so ==10 is arbitrary -- other vals might work too
-        pu_prior = MultivariateNormal(torch.zeros(self.inducing_pts), 10*torch.eye(self.inducing_pts))
         #for task
-        #add mean and variance of linear weight as trainable params
-        #start with sa==0, va==1
-        #that is, our prior is N(0, 1)
-        #no params for actual GP --> this is a binary variable!!!
-        self.sa_task = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        #initialize params representing kappa posterior mean (sa) and std (va)
+        #no params for non-linear GP piece --> this is a binary variable!!!
+        self.sa_task = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['task']['sa'] = self.sa_task
-        self.va_task = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+        self.va_task = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['task']['va'] = self.va_task
 
-		#Now init GP + lin params for other regressors (all of these are NOT binary)
-        #Ranges used are the ones for z-scored inputs.
+		#Now init kappa + non-linear GP params for other (non-binary) regressors
 		#x trans
         self.xu_x = torch.linspace(-4.00, 3.50, self.inducing_pts).to(self.device)
         self.gp_params['x']['xu'] = self.xu_x
-        self.Y_x = torch.nn.Parameter(pu_prior.rsample().to(self.device))
-        self.gp_params['x']['y'] = self.Y_x
+        self.qu_m_x = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.gp_params['x']['qu_m'] = self.qu_m_x
+        self.qu_S_x = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.gp_params['x']['qu_S'] = self.qu_S_x
         self.logkvar_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['x']['logkvar'] = self.logkvar_x
         self.logls_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['x']['log_ls'] = self.logls_x
-        self.sa_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.sa_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['x']['sa'] = self.sa_x
-        self.va_x = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+        self.va_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['x']['va'] = self.va_x
         #y trans
         self.xu_y = torch.linspace(-2.5, 3.42, self.inducing_pts).to(self.device)
         self.gp_params['y']['xu'] = self.xu_y
-        self.Y_y = torch.nn.Parameter(pu_prior.rsample().to(self.device))
-        self.gp_params['y']['y'] = self.Y_y
+        self.qu_m_y = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.gp_params['y']['qu_m'] = self.qu_m_y
+        self.qu_S_y = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.gp_params['y']['qu_S'] = self.qu_S_y
         self.logkvar_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['y']['logkvar'] = self.logkvar_y
         self.logls_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['y']['log_ls'] = self.logls_y
-        self.sa_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.sa_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['y']['sa'] = self.sa_y
-        self.va_y = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+        self.va_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['y']['va'] = self.va_y
         #z trans
         self.xu_z = torch.linspace(-3.45, 3.80, self.inducing_pts).to(self.device)
         self.gp_params['z']['xu'] = self.xu_z
-        self.Y_z = torch.nn.Parameter(pu_prior.rsample().to(self.device))
-        self.gp_params['z']['y'] = self.Y_z
+        self.qu_m_z = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.gp_params['z']['qu_m'] = self.qu_m_z
+        self.qu_S_z = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.gp_params['z']['qu_S'] = self.qu_S_z
         self.logkvar_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['z']['logkvar'] = self.logkvar_z
         self.logls_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['z']['log_ls'] = self.logls_z
-        self.sa_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.sa_z = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['z']['sa'] = self.sa_z
-        self.va_z = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
-        self.gp_params['z']['va'] = self.va_z
-
+        self.va_z = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.gp_params['z']['va'] = self.va_y
         #rotational ones
         #xrot
         self.xu_xrot = torch.linspace(-3.31, 2.73, self.inducing_pts).to(self.device)
         self.gp_params['xrot']['xu'] = self.xu_xrot
-        self.Y_xrot = torch.nn.Parameter(pu_prior.rsample().to(self.device))
-        self.gp_params['xrot']['y'] = self.Y_xrot
+        self.qu_m_xrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.gp_params['xrot']['qu_m'] = self.qu_m_xrot
+        self.qu_S_xrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.gp_params['xrot']['qu_S'] = self.qu_S_xrot
         self.logkvar_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['xrot']['logkvar'] = self.logkvar_xrot
         self.logls_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['xrot']['log_ls'] = self.logls_xrot
-        self.sa_xrot = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.sa_xrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['xrot']['sa'] = self.sa_xrot
-        self.va_xrot = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+        self.va_xrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['xrot']['va'] = self.va_xrot
 
         #yrot
         self.xu_yrot = torch.linspace(-3.14, 4.76, self.inducing_pts).to(self.device)
         self.gp_params['yrot']['xu'] = self.xu_yrot
-        self.Y_yrot= torch.nn.Parameter(pu_prior.rsample().to(self.device))
-        self.gp_params['yrot']['y'] = self.Y_yrot
+        self.qu_m_yrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.gp_params['yrot']['qu_m'] = self.qu_m_yrot
+        self.qu_S_yrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.gp_params['yrot']['qu_S'] = self.qu_S_yrot
         self.logkvar_yrot = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['yrot']['logkvar'] = self.logkvar_yrot
         self.logls_yrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['yrot']['log_ls'] = self.logls_yrot
-        self.sa_yrot = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.sa_yrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['yrot']['sa'] = self.sa_yrot
-        self.va_yrot = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+        self.va_yrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['yrot']['va'] = self.va_yrot
 
         #zrot
         self.xu_zrot = torch.linspace(-3.03, 2.54, self.inducing_pts).to(self.device)
         self.gp_params['zrot']['xu'] = self.xu_zrot
-        self.Y_zrot= torch.nn.Parameter(pu_prior.rsample().to(self.device))
-        self.gp_params['zrot']['y'] = self.Y_zrot
+        self.qu_m_zrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.gp_params['zrot']['qu_m'] = self.qu_m_zrot
+        self.qu_S_zrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.gp_params['zrot']['qu_S'] = self.qu_S_zrot
         self.logkvar_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['zrot']['logkvar'] = self.logkvar_zrot
         self.logls_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['zrot']['log_ls'] = self.logls_zrot
-        self.sa_zrot = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
+        self.sa_zrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['zrot']['sa'] = self.sa_zrot
-        self.va_zrot = torch.nn.Parameter(torch.as_tensor((1.0)).to(self.device))
+        self.va_zrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['zrot']['va'] = self.va_zrot
+
         # init z_prior --> for VAE latents
         # When initializing mean, cov_factor and cov_diag '.to(self.device)'
         #piece is  NEEDED for vals to be  properly passed to CUDA.
@@ -306,97 +315,6 @@ class VAE(nn.Module):
         h = F.relu(self.convt4(h))
         return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
-    #modules added to substitute too similar/redundant GP min-batch samples
-    #these were causing issues with cholesky decompositions in GP module
-
-    #def get_neighbors_dict(self, xqs):
-    #    """
-    #    Create dict with keys being xqs indeces and
-    #    entries being index for pt itself + for any other points
-    #    within a given rounding threshold of it.
-    #    """
-    #    neighbors = {}
-    #    xqs = xqs.detach().cpu().numpy()
-    #    for i in range(xqs.shape[0]):
-    #        item = xqs[i]
-    #        item_nn_idxs = [i] #add item itself to its nn list
-    #        for j in range(xqs.shape[0]):
-    #            diff = np.abs(item - xqs[j])
-    #            if i!=j and diff <= 1e-3:
-    #                item_nn_idxs.append(j)
-    #        neighbors[str(i)] = item_nn_idxs
-    #    return neighbors
-
-    #def get_curated_samples(self, neighbors_dict, xqs):
-    #    """
-    #    Uses neighbors_dict to create another dict containing:
-    #    1) Curated Xq entries to be passed to GP.
-    #    This is either pt itself if entry has no neighbors OR
-    #    average of avaible neighbor points.
-    #    2) Number of neighbors for each unique entry. This will be used
-    #    to scale Sigma_0.
-    #    3) Unique_idxs: indeces for unique entries/pts
-    #    4) Deleted_idxs: indeces for entries that were considered redundant.
-    #    These are incorporated into average for a unique pt.
-    #    """
-    #    xqs = xqs.detach().cpu().numpy()
-    #    means, nn_counts = [], []
-    #    unique_idxs, deleted_idxs, idxs_accounted_for = [], [], []
-    #    for i in range(len(list(neighbors_dict.keys()))):
-    #        if i not in idxs_accounted_for:
-    #            curr_nn = neighbors_dict[str(i)]
-    #            unique_idxs.append(i)
-    #            if len(curr_nn)==1:
-                    #pt has no neighbors
-    #                means.append(xqs[curr_nn[0]])
-    #                nn_counts.append(1.0)
-    #                idxs_accounted_for.append(i)
-    #            else:
-                    #pt has neighbors
-    #                means.append(np.mean(np.take(xqs, curr_nn)))
-    #                nn_counts.append(len(curr_nn))
-    #                idxs_accounted_for.extend(curr_nn)
-    #        else:
-    #            deleted_idxs.append(i)
-
-    #    curated_samples = {'mean': np.array(means), 'nn_counts': np.array(nn_counts), \
-    #    'unique_idxs': np.array(unique_idxs), 'deleted_idxs':np.array(deleted_idxs)}
-    #    return curated_samples
-
-
-    #def get_replacement_sample(self, idx_replaced, neighbors_dict, unique_idxs, samples):
-    #    """
-    #    Gets replacement sample for a redundant input.
-    #    Essentially uses sample for corresponding unique component of
-    #    MV Gaussian as surrogate sample for the replaced/redundant pt.
-    #    """
-    #    replacement_set = neighbors_dict[str(idx_replaced)]
-    #    for i in replacement_set:
-    #        if i in unique_idxs:
-    #            replacement_sample = samples[np.where(unique_idxs==i)]
-    #            return replacement_sample
-
-    #def get_all_samples(self, neighbors_dict, idxs_replaced, unique_idxs, samples):
-    #    """
-    #    Constructs y_q sample tensor.
-    #    For unique pts/entries --> samples are obtained using GP module's rsample() method.
-    #    For non-unique/replaced pts --> samples are obtained using get_replacement_sample
-    #    method.
-    #    """
-    #    samples = samples.detach().cpu().numpy()
-        #get array w/ all replacement samples
-    #    replaced_samples = []
-    #    for i in idxs_replaced:
-    #        replacement = self.get_replacement_sample(i, neighbors_dict, unique_idxs, samples)
-    #        replaced_samples.append(replacement)
-    #    replaced_samples = np.array(replaced_samples)
-        #now create all samples arr
-    #    all_samples = np.zeros(len(list(neighbors_dict.keys())))
-    #    np.put(all_samples, idxs_replaced.astype(int), replaced_samples)
-    #    np.put(all_samples, unique_idxs.astype(int), samples)
-    #    return torch.FloatTensor(all_samples).to(self.device)
-
-
     def forward(self, ids, covariates, x, return_latent_rec=False):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
         'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
@@ -423,7 +341,6 @@ class VAE(nn.Module):
         x_rec = self.decode(zcat).view(x.shape[0], -1)
         imgs['base'] = x_rec.detach().cpu().numpy()
         for i in range(1,self.num_covariates+1):
-            #print(i)
             cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
             dtype=torch.int64), self.num_covariates+1)
             cov_oh = cov_oh.to(self.device).float()
@@ -431,35 +348,36 @@ class VAE(nn.Module):
             diff = self.decode(zcat).view(x.shape[0], -1)
             #get xqs, these are inputs for query pts
             xq = covariates[:, i-1]
-            #get linear weights
-            ma = Normal(self.gp_params[gp_params_keys[i-1]]['sa'], self.gp_params[gp_params_keys[i-1]]['va'])
-            ka = ma.rsample()
-            #now compute lin term kl
+            #compute kappa KL
             #and add it to GP loss
-            gp_linW_kl = calc_linW_KL(self.gp_params[gp_params_keys[i-1]]['sa'], \
-            self.gp_params[gp_params_keys[i-1]]['va'])
+            gp_linW_kl = calc_linW_KL(self.gp_params[gp_params_keys[i-1]]['sa'][0], \
+            self.gp_params[gp_params_keys[i-1]]['va'][0], self.k_prior)
+            #print(gp_linW_kl)
             gp_loss += gp_linW_kl
-            #set non-linear (GP term) to zeros
-            #this will remain zero for bin covariates... And will be updated for continuous ones.
-            y_q = torch.zeros(ids.shape[0]).to(self.device)
+            ma = Normal(self.gp_params[gp_params_keys[i-1]]['sa'][0], self.gp_params[gp_params_keys[i-1]]['va'][0])
+            task_var = ma.rsample() * xq
             if i!=1:
                 #get params for GP regressor
                 Xu = self.gp_params[gp_params_keys[i-1]]['xu']
-                Yu = self.gp_params[gp_params_keys[i-1]]['y']
-                #mk sure kvar is at least some small positive number
+                qu = MultivariateNormal(self.gp_params[gp_params_keys[i-1]]['qu_m'], \
+                self.gp_params[gp_params_keys[i-1]]['qu_S'])
+                Yu = qu.rsample()[0]
                 kvar = (self.gp_params[gp_params_keys[i-1]]['logkvar']).exp() + 0.1
-                #mk sure ls doesn't grow to infinity
                 sig = nn.Sigmoid()
                 ls = self.max_ls * sig((self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5)
                 gp_regressor = gp.GP(Xu, Yu, kvar, ls)
-                y_q = gp_regressor.rsample(xq, i, self.save_dir)
-                gp_kl = gp_regressor.calc_GP_kl(xq)
+                #get params for beta dist
+                beta_diag = torch.pow(self.gp_params[gp_params_keys[i-1]]['va'][0], 2)* torch.pow(xq, 2) * torch.eye(ids.shape[0]).to(self.device)
+                beta_mean = self.gp_params[gp_params_keys[i-1]]['sa'][0] * xq
+                beta_Sigma0 = gp_regressor.calc_beta_Sigma0(xq, (10*torch.eye(self.inducing_pts).to(self.device)))
+                beta_dist = MultivariateNormal(beta_mean, \
+                (beta_diag + beta_Sigma0 + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
+                task_var = beta_dist.rsample()
+                gp_kl = kl.kl_divergence(qu, self.pu)
                 gp_loss += gp_kl
-            #use linear weight + GP prediction to construct full scalling factor
-            task_var = (ka * covariates[:, i-1]) + y_q
             #convolve FULL scaling factor w/ HRF
             #this is done for biological regressors only
-            ##will need to  make a cleaner version of the implementation below
+            #try to do this without detaching ... This way op counts when computing gradients
             if i ==1:
                 #if covariate is task...
                 #need to convolve (GP output + k * covariate) result with HRF
@@ -561,32 +479,38 @@ class VAE(nn.Module):
         #this includes gp_params dict
         state['sa_task'] = self.sa_task
         state['va_task'] = self.va_task
-        state['Y_x'] = self.Y_x
+        state['qu_m_x'] = self.qu_m_x
+        state['qu_S_x'] = self.qu_S_x
         state['logkvar_x'] = self.logkvar_x
         state['logls_x'] = self.logls_x
         state['sa_x'] = self.sa_x
         state['va_x'] = self.va_x
-        state['Y_y'] = self.Y_y
+        state['qu_m_y'] = self.qu_m_y
+        state['qu_S_y'] = self.qu_S_y
         state['logkvar_y'] = self.logkvar_y
         state['logls_y'] = self.logls_y
         state['sa_y'] = self.sa_y
         state['va_y'] = self.va_y
-        state['Y_z'] = self.Y_z
+        state['qu_m_z'] = self.qu_m_z
+        state['qu_S_z'] = self.qu_S_z
         state['logkvar_z'] = self.logkvar_z
         state['logls_z'] = self.logls_z
         state['sa_z'] = self.sa_z
         state['va_z'] = self.va_z
-        state['Y_xrot'] = self.Y_xrot
+        state['qu_m_xrot'] = self.qu_m_xrot
+        state['qu_S_xrot'] = self.qu_S_xrot
         state['logkvar_xrot'] = self.logkvar_xrot
         state['logls_xrot'] = self.logls_xrot
         state['sa_xrot'] = self.sa_xrot
         state['va_xrot'] = self.va_xrot
-        state['Y_yrot'] = self.Y_yrot
+        state['qu_m_yrot'] = self.qu_m_yrot
+        state['qu_S_yrot'] = self.qu_S_yrot
         state['logkvar_yrot'] = self.logkvar_yrot
         state['logls_yrot'] = self.logls_yrot
         state['sa_yrot'] = self.sa_yrot
         state['va_yrot'] = self.va_yrot
-        state['Y_zrot'] = self.Y_zrot
+        state['qu_m_zrot'] = self.qu_m_zrot
+        state['qu_S_zrot'] = self.qu_S_zrot
         state['logkvar_zrot'] = self.logkvar_zrot
         state['logls_zrot'] = self.logls_zrot
         state['sa_zrot'] = self.sa_zrot
@@ -615,32 +539,38 @@ class VAE(nn.Module):
         #and load gp_params dict - needed here (otherwise only initial values are plotted!)
         self.sa_task = checkpoint['sa_task']
         self.va_task = checkpoint['va_task']
-        self.Y_x = checkpoint['Y_x']
+        self.qu_m_x = checkpoint['qu_m_x']
+        self.qu_S_x = checkpoint['qu_S_x']
         self.logkvar_x = checkpoint['logkvar_x']
         self.logls_x = checkpoint['logls_x']
         self.sa_x = checkpoint['sa_x']
         self.va_x = checkpoint['va_x']
-        self.Y_y = checkpoint['Y_y']
+        self.qu_m_y = checkpoint['qu_m_y']
+        self.qu_S_y = checkpoint['qu_S_y']
         self.logkvar_y = checkpoint['logkvar_y']
         self.logls_y = checkpoint['logls_y']
         self.sa_y = checkpoint['sa_y']
         self.va_y = checkpoint['va_y']
-        self.Y_z = checkpoint['Y_z']
+        self.qu_m_z = checkpoint['qu_m_z']
+        self.qu_S_z = checkpoint['qu_S_z']
         self.logkvar_z = checkpoint['logkvar_z']
         self.logls_z = checkpoint['logls_z']
         self.sa_z = checkpoint['sa_z']
         self.va_z = checkpoint['va_z']
-        self.Y_xrot = checkpoint['Y_xrot']
+        self.qu_m_xrot = checkpoint['qu_m_xrot']
+        self.qu_S_xrot = checkpoint['qu_S_xrot']
         self.logkvar_xrot = checkpoint['logkvar_xrot']
         self.logls_xrot = checkpoint['logls_xrot']
         self.sa_xrot = checkpoint['sa_xrot']
         self.va_xrot = checkpoint['va_xrot']
-        self.Y_yrot = checkpoint['Y_yrot']
+        self.qu_m_yrot = checkpoint['qu_m_yrot']
+        self.qu_S_yrot = checkpoint['qu_S_yrot']
         self.logkvar_yrot = checkpoint['logkvar_yrot']
         self.logls_yrot= checkpoint['logls_yrot']
         self.sa_yrot = checkpoint['sa_yrot']
         self.va_yrot = checkpoint['va_yrot']
-        self.Y_zrot = checkpoint['Y_zrot']
+        self.qu_m_zrot = checkpoint['qu_m_zrot']
+        self.qu_S_zrot = checkpoint['qu_S_xrot']
         self.logkvar_zrot = checkpoint['logkvar_zrot']
         self.logls_zrot = checkpoint['logls_zrot']
         self.sa_zrot = checkpoint['sa_zrot']
@@ -738,26 +668,28 @@ class VAE(nn.Module):
         all_covariates = all_covariates.to_numpy()
         all_covariates = torch.from_numpy(all_covariates)
         regressors = list(self.gp_params.keys())
-        for i in range(1, len(regressors)): #skip task
-            #create dict to hold all entries for each cov -- original input + predicted mean
-            #and predicted vars for all points
+        for i in range(1, len(regressors)): #skip task b/c its binary variable
             curr_cov = {};
             #build GP for the regressor
             xu = self.gp_params[regressors[i]]['xu']
-            yu = self.gp_params[regressors[i]]['y']
+            qu = MultivariateNormal(self.gp_params[regressors[i]]['qu_m'], \
+            self.gp_params[regressors[i]]['qu_S'])
+            yu = qu.sample()[0]
             kvar = (self.gp_params[regressors[i]]['logkvar']).exp() + 0.1
             sig = nn.Sigmoid()
             ls = self.max_ls * sig((self.gp_params[regressors[i]]['log_ls']).exp() + 0.5)
             gp_regressor = gp.GP(xu, yu, kvar, ls)
             #get all xi's for regressor
-            #get prediction
             covariates = all_covariates[:, i-1]
             xq = covariates.to(self.device)
-            yq, yvar = gp_regressor.predict(xq)
+            beta_Sigma0 = gp_regressor.calc_beta_Sigma0(xq, (10*torch.eye(self.inducing_pts).to(self.device)))
+            beta_diag = torch.pow(self.gp_params[regressors[i]]['va'][0], 2)* torch.pow(xq, 2) * torch.eye(xq.shape[0]).to(self.device)
+            beta_mean = self.gp_params[regressors[i]]['sa'][0] * xq
+            beta_vars = beta_Sigma0 + beta_diag
             #add vals to covar dict
             curr_cov["xq"] = covariates
-            curr_cov["mean"] = yq.detach().cpu().numpy().tolist()
-            curr_cov["vars"] = yvar.detach().cpu().numpy().tolist()
+            curr_cov["mean"] = beta_mean.detach().cpu().numpy().tolist()
+            curr_cov["vars"] = torch.diag(beta_vars).detach().cpu().numpy().tolist() #can't plot 32x32 cov mat direclty
             #save this dict
             outfull_name = str(self.epoch).zfill(3) + '_GP_' + keys[i-1] + '_full.csv'
             covariate_full_data = pd.DataFrame.from_dict(curr_cov)
@@ -767,24 +699,20 @@ class VAE(nn.Module):
             sorted_full_data.to_csv(os.path.join(plot_dir, outfull_name))
             #calc variance of predicted GP mean
             #and pass it to dict
-            yq_variance = torch.var(yq)
-            covariates_mean_vars[keys[i-1]] = [yq_variance.detach().cpu().numpy()]
-            #pass vars to cpu and np prior to plotting
-            x_u = xu.detach().cpu().numpy()
-            y_u = yu.detach().cpu().numpy()
+            beta_mean_variance = torch.var(beta_mean)
+            covariates_mean_vars[keys[i-1]] = [beta_mean_variance.detach().cpu().numpy()]
             #create plots and save them
             plt.clf()
             plt.plot(sorted_full_data["xq"], sorted_full_data["mean"], c='darkblue', alpha=0.5, label='posterior mean')
             two_sigma = 2*np.sqrt(sorted_full_data["vars"])
             kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
             plt.fill_between(sorted_full_data["xq"], (sorted_full_data["mean"]-two_sigma), (sorted_full_data["mean"]+two_sigma), **kwargs)
-            plt.scatter(x_u, y_u, c='k', label='inducing points')
             plt.locator_params(axis='x', nbins = 6)
             plt.locator_params(axis='y', nbins = 4)
             plt.legend(loc='best')
             plt.title('GP Plot {}_{}'.format(regressors[i], 'full_set'))
             plt.xlabel('Covariate')
-            plt.ylabel('GP Prediction')
+            plt.ylabel('LinW + GP Prediction')
             #save plot
             filename = 'GP_{}_{}.pdf'.format(regressors[i], 'full_set')
             file_path = os.path.join(plot_dir, filename)

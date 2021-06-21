@@ -44,58 +44,58 @@ class GP():
         self.k_chol = torch.cholesky(self.ky)
         self.alpha = torch.inverse(self.k_chol.transpose(0,1)) @ torch.inverse(self.k_chol) @ Yu.unsqueeze(1)
 
-    def evaluate_posterior(self, X_q):
-        """
-        Calculate the posterior at the given query points.
-        Parameters
-        ----------
-        X_q : torch.Tensor
-        Query points.
+    #def evaluate_posterior(self, X_q):
+    #    """
+    #    Calculate the posterior at the given query points.
+    #    Parameters
+    #    ----------
+    #    X_q : torch.Tensor
+    #    Query points.
 
-        Returns
-        -------
-        mean : torch.tensor
-        Posterior means.
-        covar : torch.tensor
-        Posterior covariances.
-        """
-        n_q = X_q.shape[0]
-        k_q = torch.zeros((self.n, n_q)).to(self.device)
-        diff = self.step * self.n
-        for j in range(n_q):
-            dist = float(self.Xu[0] - X_q[j])
-            k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
-        k_q = _distance_to_kernel(k_q, self.k_var, self.ls)
-        mean = k_q.transpose(0,1) @ self.alpha
-        v = torch.inverse(self.k_chol) @ k_q
-        k_qq = torch.zeros((n_q,n_q)).to(self.device)
-        for i in range(n_q-1):
-            for j in range(i+1, n_q):
-                dist = X_q[i] - X_q[j]
-                k_qq[i,j] = dist
-                k_qq[j,i] = dist
-        k_qq = _distance_to_kernel(k_qq, self.k_var, self.ls)
-        covar = k_qq - v.transpose(0,1) @ v
-        return mean.squeeze(1), covar
+    #    Returns
+    #    -------
+    #    mean : torch.tensor
+    #    Posterior means.
+    #    covar : torch.tensor
+    #    Posterior covariances.
+    #    """
+    #    n_q = X_q.shape[0]
+    #    k_q = torch.zeros((self.n, n_q)).to(self.device)
+    #    diff = self.step * self.n
+    #    for j in range(n_q):
+    #        dist = float(self.Xu[0] - X_q[j])
+    #        k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
+    #    k_q = _distance_to_kernel(k_q, self.k_var, self.ls)
+    #    mean = k_q.transpose(0,1) @ self.alpha
+    #    v = torch.inverse(self.k_chol) @ k_q
+    #    k_qq = torch.zeros((n_q,n_q)).to(self.device)
+    #    for i in range(n_q-1):
+    #        for j in range(i+1, n_q):
+    #            dist = X_q[i] - X_q[j]
+    #            k_qq[i,j] = dist
+    #            k_qq[j,i] = dist
+    #    k_qq = _distance_to_kernel(k_qq, self.k_var, self.ls)
+    #    covar = k_qq - v.transpose(0,1) @ v
+    #    return mean.squeeze(1), covar
 
-    def predict(self, X_q):
-        """
-        Predict the given query points.
+    #def predict(self, X_q):
+    #    """
+    #    Predict the given query points.
 
-        Parameters
-        ----------
-        X_q : torch.Tensor
-        Query points.
+    #    Parameters
+    #    ----------
+    #    X_q : torch.Tensor
+    #    Query points.
 
-        Returns
-        -------
-        mean : torch.tensor
-        Prediction means.
-        var : torch.tensor
-        Prediction variances.
-        """
-        mean, covar = self.evaluate_posterior(X_q)
-        return mean, torch.diag(covar) # diag necessary?
+    #    Returns
+    #    -------
+    #    mean : torch.tensor
+    #    Prediction means.
+    #    var : torch.tensor
+    #    Prediction variances.
+    #    """
+    #    mean, covar = self.evaluate_posterior(X_q)
+    #    return mean, torch.diag(covar) # diag necessary?
 
 
     def rsample(self, X_q, covar_id, save_dir, eps=1e-4):
@@ -117,71 +117,47 @@ class GP():
         """
         mean, covar = self.evaluate_posterior(X_q)
         covar = covar + eps * torch.eye(covar.shape[0]).to(self.device)
-        #adding block below to catch cases where posterior cov becomes singular
-        #this happened once, but overall it is a very rare event
         m = MultivariateNormal(mean, covar)
         return m.rsample()
 
-    #commented method and adopted a non-trainable (fixed) Sigma_0 instead
-    #Sigma_0 (prior over query pts) was singular and causing issues later on
-    #when computing kl for GP
-
-    #def calc_prior_cov(self, X_q, nn_counts):
-    #    """
-    #    Computes prior covariance matrix for query data points (Sigma_0)
-    #    Using covariance for prior over inducing points, Ku and Knu -- as defined on Appendix # B
-    #    Parameters
-    #    ----------
-    #    X_q : torch.tensor
-    #    Query points.
-
-    #    Returns
-    #    -----------
-    #    Sigma_0: torch.tensor
-    #    Covariance Matrix for prior distribution over data (query) points
-    #    """
-        #get Knu --> kernel distances between inducing pts and data points
-    #    n_q = X_q.shape[0]
-    #    k_q = torch.zeros((self.n, n_q)).to(self.device)
-    #    diff = self.step * self.n
-    #    for j in range(n_q):
-    #        dist = float(self.Xu[0] - X_q[j])
-    #        k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
-    #    k_q = _distance_to_kernel(k_q, self.k_var, self.ls, self.sigma_y) #shape == 6x32, for 6 inducing pts and n=32 minibatch
-    #    pu_cov = 10*torch.eye(6).to(self.device) #this is cov for prior over inducing pts. Chose s0^2 == 10.
-        #get Ku --> mat formed by evaluating kernel at each pair of inducing pts
-    #    ku = _striped_matrix(self.n)
-    #    ku = ku * self.step
-    #    ku = _distance_to_kernel(ku, self.k_var, self.ls, self.sigma_y)
-    #    A = k_q.T @ torch.inverse(ku)
-    #    Sigma_0 = A @ (pu_cov - ku) @ A.T
-    #    return Sigma_0
-
-    def calc_GP_kl(self, X_q):
+    def calc_beta_Sigma0(self, X_q, pu_cov):
         """
-        Computes KL between GP prior and posterior GPs
-        using closed-form for KL between 2 MV Gaussians.
-
+        Computes prior covariance matrix for query data points (Sigma_0)
+        Using covariance for prior over inducing points, Ku and Knu -- as defined on Appendix # B
         Parameters
-        ------------
-        X_q: torch.tensor
-        Query points
-        Assumes a non-trainable (fixed) prior over query pts.
-
+        ----------
+        X_q : torch.tensor
+        Query points.
+        pu_cov: torch.Tensor
+        Covariance matrix for prior over GP inducing points.
+        Should be of form -- so^{2} * I
         Returns
-        -------------
-        Kl divergence between prior and posterior GP distributions over data pts
+        -----------
+        Sigma_0: torch.tensor
+        Covariance Matrix for prior distribution over data (query) points
         """
+        #get Knu --> kernel distances between inducing pts and data points
+        n_q = X_q.shape[0]
+        k_q = torch.zeros((self.n, n_q)).to(self.device)
+        diff = self.step * self.n
+        for j in range(n_q):
+            dist = float(self.Xu[0] - X_q[j])
+            k_q[:,j] = torch.arange(dist, dist + diff, self.step)[:self.n]
+        k_q = _distance_to_kernel(k_q, self.k_var, self.ls)
+        #get Knn --> mat formed by evaluating kernel at data/min-batch points
+        knn = torch.zeros((n_q, n_q)).to(self.device)
+        for i in range(n_q):
+                item = X_q[i].expand(1, n_q)
+                diff = X_q - item
+                knn[i, :] = diff
+        knn = _distance_to_kernel(knn, self.k_var, self.ls)
+        #get Ku --> mat formed by evaluating kernel at each pair of inducing pts
+        ku = _striped_matrix(self.n)
+        ku = _distance_to_kernel(ku, self.k_var, self.ls, self.step)
+        A = k_q.T @ torch.inverse(ku)
+        Sigma_0 = knn + (A @ (pu_cov - ku) @ A.T)
+        return Sigma_0
 
-        fa, Sigma_a = self.evaluate_posterior(X_q)
-        #using a pre-set prior here... As opposed to a trainable one.
-        Sigma_0 = 1e-1*torch.eye(X_q.shape[0]).to(self.device)
-        #again unsure if 1e-4 fudge factor below is truly needed.
-        #in simulations I ran, it helps a ton in stabilizing things and allowing model to run stably
-        q_f = MultivariateNormal(fa, (Sigma_a + 1e-4*torch.eye(X_q.shape[0]).to(self.device)))
-        p_f = MultivariateNormal(torch.zeros(X_q.shape[0]).to(self.device), Sigma_0)
-        gp_kl = kl.kl_divergence(p_f, q_f)
-        return gp_kl
 
 def _striped_matrix(n):
     """Make and n-by-n matrix with entries given by l1 distance to diagonal."""
