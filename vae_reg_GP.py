@@ -123,7 +123,7 @@ class VAE(nn.Module):
         #no params for non-linear GP piece --> this is a binary variable!!!
         self.sa_task = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['task']['sa'] = self.sa_task
-        self.va_task = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.va_task = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
         self.gp_params['task']['va'] = self.va_task
 
 		#Now init kappa + non-linear GP params for other (non-binary) regressors
@@ -140,7 +140,7 @@ class VAE(nn.Module):
         self.gp_params['x']['log_ls'] = self.logls_x
         self.sa_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['x']['sa'] = self.sa_x
-        self.va_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.va_x = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
         self.gp_params['x']['va'] = self.va_x
         #y trans
         self.xu_y = torch.linspace(-2.5, 3.42, self.inducing_pts).to(self.device)
@@ -155,7 +155,7 @@ class VAE(nn.Module):
         self.gp_params['y']['log_ls'] = self.logls_y
         self.sa_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['y']['sa'] = self.sa_y
-        self.va_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.va_y = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
         self.gp_params['y']['va'] = self.va_y
         #z trans
         self.xu_z = torch.linspace(-3.45, 3.80, self.inducing_pts).to(self.device)
@@ -170,7 +170,7 @@ class VAE(nn.Module):
         self.gp_params['z']['log_ls'] = self.logls_z
         self.sa_z = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['z']['sa'] = self.sa_z
-        self.va_z = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.va_z = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
         self.gp_params['z']['va'] = self.va_y
         #rotational ones
         #xrot
@@ -186,7 +186,7 @@ class VAE(nn.Module):
         self.gp_params['xrot']['log_ls'] = self.logls_xrot
         self.sa_xrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['xrot']['sa'] = self.sa_xrot
-        self.va_xrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.va_xrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
         self.gp_params['xrot']['va'] = self.va_xrot
 
         #yrot
@@ -202,7 +202,7 @@ class VAE(nn.Module):
         self.gp_params['yrot']['log_ls'] = self.logls_yrot
         self.sa_yrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['yrot']['sa'] = self.sa_yrot
-        self.va_yrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.va_yrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
         self.gp_params['yrot']['va'] = self.va_yrot
 
         #zrot
@@ -218,7 +218,7 @@ class VAE(nn.Module):
         self.gp_params['zrot']['log_ls'] = self.logls_zrot
         self.sa_zrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
         self.gp_params['zrot']['sa'] = self.sa_zrot
-        self.va_zrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.va_zrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
         self.gp_params['zrot']['va'] = self.va_zrot
 
         # init z_prior --> for VAE latents
@@ -340,7 +340,7 @@ class VAE(nn.Module):
         zcat = torch.cat([z, base_oh], 1).float()
         x_rec = self.decode(zcat).view(x.shape[0], -1)
         imgs['base'] = x_rec.detach().cpu().numpy()
-        for i in range(1,self.num_covariates+1):
+        for i in range(1, (self.num_covariates+1)):
             cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
             dtype=torch.int64), self.num_covariates+1)
             cov_oh = cov_oh.to(self.device).float()
@@ -352,32 +352,32 @@ class VAE(nn.Module):
             #and add it to GP loss
             gp_linW_kl = calc_linW_KL(self.gp_params[gp_params_keys[i-1]]['sa'][0], \
             self.gp_params[gp_params_keys[i-1]]['va'][0], self.k_prior)
-            #print(gp_linW_kl)
             gp_loss += gp_linW_kl
-            ma = Normal(self.gp_params[gp_params_keys[i-1]]['sa'][0], self.gp_params[gp_params_keys[i-1]]['va'][0])
-            task_var = ma.rsample() * xq
+            beta_mean = self.gp_params[gp_params_keys[i-1]]['sa'][0] * xq
+            beta_cov = torch.pow(self.gp_params[gp_params_keys[i-1]]['va'][0], 2)* torch.pow(xq, 2) * torch.eye(ids.shape[0]).to(self.device)
             if i!=1:
                 #get params for GP regressor
                 Xu = self.gp_params[gp_params_keys[i-1]]['xu']
-                qu = MultivariateNormal(self.gp_params[gp_params_keys[i-1]]['qu_m'], \
-                self.gp_params[gp_params_keys[i-1]]['qu_S'])
-                Yu = qu.rsample()[0]
                 kvar = (self.gp_params[gp_params_keys[i-1]]['logkvar']).exp() + 0.1
                 sig = nn.Sigmoid()
                 ls = self.max_ls * sig((self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5)
-                gp_regressor = gp.GP(Xu, Yu, kvar, ls)
-                #get params for beta dist
-                beta_diag = torch.pow(self.gp_params[gp_params_keys[i-1]]['va'][0], 2)* torch.pow(xq, 2) * torch.eye(ids.shape[0]).to(self.device)
-                beta_mean = self.gp_params[gp_params_keys[i-1]]['sa'][0] * xq
-                beta_Sigma0 = gp_regressor.calc_beta_Sigma0(xq, (10*torch.eye(self.inducing_pts).to(self.device)))
-                beta_dist = MultivariateNormal(beta_mean, \
-                (beta_diag + beta_Sigma0 + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
-                task_var = beta_dist.rsample()
+                gp_regressor = gp.GP(Xu, kvar, ls)
+                #update loc, scale for beta distribution
+                f_bar, Sigma = gp_regressor.evaluate_posterior(xq, self.gp_params[gp_params_keys[i-1]]['qu_m'], \
+                self.gp_params[gp_params_keys[i-1]]['qu_S'])
+                beta_mean += f_bar
+                beta_cov += Sigma
+                #now get Kl  for non-linear GP term
+                qu = MultivariateNormal(self.gp_params[gp_params_keys[i-1]]['qu_m'], \
+                self.gp_params[gp_params_keys[i-1]]['qu_S'])
                 gp_kl = kl.kl_divergence(qu, self.pu)
                 gp_loss += gp_kl
+            #torch.set_printoptions(threshold = 10000)
+            #print(beta_cov)
+            beta_dist = MultivariateNormal(beta_mean, (beta_cov + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
+            task_var = beta_dist.rsample()
             #convolve FULL scaling factor w/ HRF
             #this is done for biological regressors only
-            #try to do this without detaching ... This way op counts when computing gradients
             if i ==1:
                 #if covariate is task...
                 #need to convolve (GP output + k * covariate) result with HRF
@@ -388,7 +388,6 @@ class VAE(nn.Module):
                 time_series = time_series[:-n_to_remove]
                 task_var = torch.FloatTensor(time_series).to(self.device)
             #use this to scale effect map
-            #using EinSum to preserve batch dim
             cons = torch.einsum('b,bx->bx', task_var, diff)
             #add cons to init_task param if covariate == 'task'
             #implementation below was adopted to avoid in place ops that would cause autograd errors
@@ -413,7 +412,7 @@ class VAE(nn.Module):
         #contract all values using torch.mean()
         elbo = torch.mean(elbo, dim=0)
         #adding GP losses to VAE loss
-        tot_loss = -elbo + self.mll_scale*(gp_loss) + self.l1_scale*(l1_reg) #swap mll_scale for gp_scale
+        tot_loss = -elbo + self.mll_scale*(-gp_loss) + self.l1_scale*(l1_reg)
         if return_latent_rec:
             return tot_loss, z.detach().cpu().numpy(), imgs
         return tot_loss
@@ -672,24 +671,22 @@ class VAE(nn.Module):
             curr_cov = {};
             #build GP for the regressor
             xu = self.gp_params[regressors[i]]['xu']
-            qu = MultivariateNormal(self.gp_params[regressors[i]]['qu_m'], \
-            self.gp_params[regressors[i]]['qu_S'])
-            yu = qu.sample()[0]
             kvar = (self.gp_params[regressors[i]]['logkvar']).exp() + 0.1
             sig = nn.Sigmoid()
             ls = self.max_ls * sig((self.gp_params[regressors[i]]['log_ls']).exp() + 0.5)
-            gp_regressor = gp.GP(xu, yu, kvar, ls)
+            gp_regressor = gp.GP(xu, kvar, ls)
             #get all xi's for regressor
             covariates = all_covariates[:, i-1]
             xq = covariates.to(self.device)
-            beta_Sigma0 = gp_regressor.calc_beta_Sigma0(xq, (10*torch.eye(self.inducing_pts).to(self.device)))
             beta_diag = torch.pow(self.gp_params[regressors[i]]['va'][0], 2)* torch.pow(xq, 2) * torch.eye(xq.shape[0]).to(self.device)
-            beta_mean = self.gp_params[regressors[i]]['sa'][0] * xq
-            beta_vars = beta_Sigma0 + beta_diag
+            f_bar, Sigma = gp_regressor.evaluate_posterior(xq, self.gp_params[regressors[i]]['qu_m'], \
+            self.gp_params[regressors[i]]['qu_S'])
+            beta_mean = (self.gp_params[regressors[i]]['sa'][0] * xq) + f_bar
+            beta_cov = beta_diag + Sigma
             #add vals to covar dict
             curr_cov["xq"] = covariates
             curr_cov["mean"] = beta_mean.detach().cpu().numpy().tolist()
-            curr_cov["vars"] = torch.diag(beta_vars).detach().cpu().numpy().tolist() #can't plot 32x32 cov mat direclty
+            curr_cov["vars"] = torch.diag(beta_cov).detach().cpu().numpy().tolist()
             #save this dict
             outfull_name = str(self.epoch).zfill(3) + '_GP_' + keys[i-1] + '_full.csv'
             covariate_full_data = pd.DataFrame.from_dict(curr_cov)
@@ -703,7 +700,7 @@ class VAE(nn.Module):
             covariates_mean_vars[keys[i-1]] = [beta_mean_variance.detach().cpu().numpy()]
             #create plots and save them
             plt.clf()
-            plt.plot(sorted_full_data["xq"], sorted_full_data["mean"], c='darkblue', alpha=0.5, label='posterior mean')
+            plt.plot(sorted_full_data["xq"], sorted_full_data["mean"], c='darkblue', alpha=0.5, label='Beta posterior mean')
             two_sigma = 2*np.sqrt(sorted_full_data["vars"])
             kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
             plt.fill_between(sorted_full_data["xq"], (sorted_full_data["mean"]-two_sigma), (sorted_full_data["mean"]+two_sigma), **kwargs)
@@ -712,7 +709,7 @@ class VAE(nn.Module):
             plt.legend(loc='best')
             plt.title('GP Plot {}_{}'.format(regressors[i], 'full_set'))
             plt.xlabel('Covariate')
-            plt.ylabel('LinW + GP Prediction')
+            plt.ylabel('Beta Ouput')
             #save plot
             filename = 'GP_{}_{}.pdf'.format(regressors[i], 'full_set')
             file_path = os.path.join(plot_dir, filename)
