@@ -14,7 +14,7 @@ import os, sys
 
 class GP():
     """1D Gaussian Process w/ X-values on a grid and a Gaussian kernel."""
-    def __init__(self, Xu, k_var, ls):
+    def __init__(self, Xu, k_var, ls, qu_m, qu_S):
         """
         Parameters
         ----------
@@ -33,8 +33,23 @@ class GP():
         self.Xu = Xu
         self.k_var = k_var
         self.ls = ls
+        self.qu_m = qu_m
+        self.qu_S = qu_S
 
-    def evaluate_posterior(self, X_q, qu_m, qu_S):
+    def compute_GP_kl(self, so_sqrd, num_inducing_pts):
+        """Computes kl for GP term """
+        #gp_kl = 0.5*(torch.reciprocal(so_sqrd)*torch.trace(self.qu_S))
+        #gp_kl += 0.5*(torch.reciprocal(so_sqrd)*torch.pow(torch.norm(self.qu_m, 2), 2))
+        #gp_kl += 0.5*(num_inducing_pts*torch.log(so_sqrd))
+        #gp_kl -= 0.5*(torch.logdet(self.qu_S))
+        #gp_kl -= 0.5*(num_inducing_pts)
+        prior_dist = MultivariateNormal(torch.zeros(num_inducing_pts).to(self.device), \
+        10*torch.eye(num_inducing_pts).to(self.device))
+        post_dist = MultivariateNormal(self.qu_m, self.qu_S)
+        gp_kl = kl.kl_divergence(post_dist, prior_dist)
+        return gp_kl
+
+    def evaluate_posterior(self, X_q):
         """
         Computes posterior over data points -- q(f).
         As denoted in equation #9 of Appendix B.
@@ -73,8 +88,8 @@ class GP():
         ku = _distance_to_kernel(ku, self.k_var, self.ls, self.step)
         #now get Sigma and f_bar
         A = knu.T @ torch.inverse(ku)
-        f_bar = A @ torch.squeeze(qu_m)
-        Sigma = knn + (A @ (qu_S - ku) @ A.T)
+        f_bar = A @ torch.squeeze(self.qu_m)
+        Sigma = knn + (A @ (self.qu_S - ku) @ A.T)
         return f_bar, Sigma
 
 

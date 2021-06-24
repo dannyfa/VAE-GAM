@@ -56,25 +56,6 @@ def hrf(times):
     # Scale max to 0.6
     return values / np.max(values) * 0.6
 
-
-#am also defining linW KL computing function here
-#this will also be imported through a separate module
-def calc_linW_KL(sa, va, k_prior):
-    """
-    Computes KL for linear weight term (kappa_\alpha)
-    This term is added to KL stemming from GP itself, to yield a total GP
-    contribution to the VAE-GAM objective.
-    Args:
-    sa --> posterior mean.
-    va --> posterior std.
-    k_prior --> prior on kappas.
-    Outputs:
-    KL between prior (N(0,1)) and posterior (N(sa, va^2))
-    """
-    q_k = Normal(sa, va)
-    linW_kl = kl.kl_divergence(q_k, k_prior)
-    return linW_kl
-
 # maintained shape of original nn by downsampling data on preprocessing
 IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
@@ -110,115 +91,111 @@ class VAE(nn.Module):
         self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
         # max_ls term is used to avoid ls from blowing up.
         self.max_ls = torch.as_tensor(3.0).to(self.device)
-        #set prior for inducing pts
-        self.pu = MultivariateNormal(torch.zeros(self.inducing_pts).to(self.device), \
-        10*torch.eye(self.inducing_pts).to(self.device))
-        #set prior for kappas
-        self.k_prior = Normal(torch.tensor([0.0]).to(self.device), \
-        torch.tensor([1.0]).to(self.device))
+        #set so_sqrd term for prior over inducing points
+        self.so_sqrd = torch.as_tensor(10.0).to(self.device)
 		#init params for GPs
         self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
         #for task
         #initialize params representing kappa posterior mean (sa) and std (va)
         #no params for non-linear GP piece --> this is a binary variable!!!
-        self.sa_task = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.sa_task = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['task']['sa'] = self.sa_task
-        self.va_task = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
+        self.va_task = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
         self.gp_params['task']['va'] = self.va_task
 
 		#Now init kappa + non-linear GP params for other (non-binary) regressors
 		#x trans
         self.xu_x = torch.linspace(-4.00, 3.50, self.inducing_pts).to(self.device)
         self.gp_params['x']['xu'] = self.xu_x
-        self.qu_m_x = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.qu_m_x = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['x']['qu_m'] = self.qu_m_x
-        self.qu_S_x = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.qu_S_x = torch.nn.Parameter(2*torch.eye(self.inducing_pts).to(self.device))
         self.gp_params['x']['qu_S'] = self.qu_S_x
         self.logkvar_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['x']['logkvar'] = self.logkvar_x
         self.logls_x = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['x']['log_ls'] = self.logls_x
-        self.sa_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.sa_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['x']['sa'] = self.sa_x
-        self.va_x = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
+        self.va_x = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
         self.gp_params['x']['va'] = self.va_x
         #y trans
         self.xu_y = torch.linspace(-2.5, 3.42, self.inducing_pts).to(self.device)
         self.gp_params['y']['xu'] = self.xu_y
-        self.qu_m_y = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.qu_m_y = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['y']['qu_m'] = self.qu_m_y
-        self.qu_S_y = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.qu_S_y = torch.nn.Parameter(2*torch.eye(self.inducing_pts).to(self.device))
         self.gp_params['y']['qu_S'] = self.qu_S_y
         self.logkvar_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['y']['logkvar'] = self.logkvar_y
         self.logls_y = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['y']['log_ls'] = self.logls_y
-        self.sa_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.sa_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['y']['sa'] = self.sa_y
-        self.va_y = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
+        self.va_y = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
         self.gp_params['y']['va'] = self.va_y
         #z trans
         self.xu_z = torch.linspace(-3.45, 3.80, self.inducing_pts).to(self.device)
         self.gp_params['z']['xu'] = self.xu_z
-        self.qu_m_z = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.qu_m_z = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['z']['qu_m'] = self.qu_m_z
-        self.qu_S_z = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.qu_S_z = torch.nn.Parameter(2*torch.eye(self.inducing_pts).to(self.device))
         self.gp_params['z']['qu_S'] = self.qu_S_z
         self.logkvar_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['z']['logkvar'] = self.logkvar_z
         self.logls_z = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['z']['log_ls'] = self.logls_z
-        self.sa_z = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.sa_z = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['z']['sa'] = self.sa_z
-        self.va_z = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
+        self.va_z = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
         self.gp_params['z']['va'] = self.va_y
         #rotational ones
         #xrot
         self.xu_xrot = torch.linspace(-3.31, 2.73, self.inducing_pts).to(self.device)
         self.gp_params['xrot']['xu'] = self.xu_xrot
-        self.qu_m_xrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.qu_m_xrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['xrot']['qu_m'] = self.qu_m_xrot
-        self.qu_S_xrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.qu_S_xrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts).to(self.device))
         self.gp_params['xrot']['qu_S'] = self.qu_S_xrot
         self.logkvar_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['xrot']['logkvar'] = self.logkvar_xrot
         self.logls_xrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['xrot']['log_ls'] = self.logls_xrot
-        self.sa_xrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.sa_xrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['xrot']['sa'] = self.sa_xrot
-        self.va_xrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
+        self.va_xrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
         self.gp_params['xrot']['va'] = self.va_xrot
 
         #yrot
         self.xu_yrot = torch.linspace(-3.14, 4.76, self.inducing_pts).to(self.device)
         self.gp_params['yrot']['xu'] = self.xu_yrot
-        self.qu_m_yrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.qu_m_yrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['yrot']['qu_m'] = self.qu_m_yrot
-        self.qu_S_yrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.qu_S_yrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts).to(self.device))
         self.gp_params['yrot']['qu_S'] = self.qu_S_yrot
         self.logkvar_yrot = torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['yrot']['logkvar'] = self.logkvar_yrot
         self.logls_yrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['yrot']['log_ls'] = self.logls_yrot
-        self.sa_yrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.sa_yrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['yrot']['sa'] = self.sa_yrot
-        self.va_yrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
+        self.va_yrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
         self.gp_params['yrot']['va'] = self.va_yrot
 
         #zrot
         self.xu_zrot = torch.linspace(-3.03, 2.54, self.inducing_pts).to(self.device)
         self.gp_params['zrot']['xu'] = self.xu_zrot
-        self.qu_m_zrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts])).to(self.device)
+        self.qu_m_zrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['zrot']['qu_m'] = self.qu_m_zrot
-        self.qu_S_zrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts)).to(self.device)
+        self.qu_S_zrot = torch.nn.Parameter(2*torch.eye(self.inducing_pts).to(self.device))
         self.gp_params['zrot']['qu_S'] = self.qu_S_zrot
         self.logkvar_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['zrot']['logkvar'] = self.logkvar_zrot
         self.logls_zrot= torch.nn.Parameter(torch.as_tensor((0.0)).to(self.device))
         self.gp_params['zrot']['log_ls'] = self.logls_zrot
-        self.sa_zrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1))).to(self.device)
+        self.sa_zrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['zrot']['sa'] = self.sa_zrot
-        self.va_zrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1))).to(self.device)
+        self.va_zrot = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
         self.gp_params['zrot']['va'] = self.va_zrot
 
         # init z_prior --> for VAE latents
@@ -315,6 +292,20 @@ class VAE(nn.Module):
         h = F.relu(self.convt4(h))
         return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
 
+    def calc_linW_KL(self, sa, va):
+        """
+        Computes KL for linear weight term (kappa_\alpha)
+        his term is added to KL stemming from GP itself, to yield a total GP
+        contribution to the VAE-GAM objective.
+        Outputs:
+        KL between prior (N(0,1)) and posterior (N(sa, va^2))
+        """
+        #qk_kl = 0.5 * (torch.pow(va, 2) + torch.pow(sa, 2) + torch.log(1.0/torch.pow(va, 2)) - 1)
+        post_dist = Normal(sa, va)
+        prior_dist = Normal(0, 1)
+        qk_kl = kl.kl_divergence(post_dist, prior_dist)
+        return qk_kl
+
     def forward(self, ids, covariates, x, return_latent_rec=False):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
         'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
@@ -348,10 +339,8 @@ class VAE(nn.Module):
             diff = self.decode(zcat).view(x.shape[0], -1)
             #get xqs, these are inputs for query pts
             xq = covariates[:, i-1]
-            #compute kappa KL
-            #and add it to GP loss
-            gp_linW_kl = calc_linW_KL(self.gp_params[gp_params_keys[i-1]]['sa'][0], \
-            self.gp_params[gp_params_keys[i-1]]['va'][0], self.k_prior)
+            gp_linW_kl = self.calc_linW_KL(self.gp_params[gp_params_keys[i-1]]['sa'][0], \
+            self.gp_params[gp_params_keys[i-1]]['va'][0])
             gp_loss += gp_linW_kl
             beta_mean = self.gp_params[gp_params_keys[i-1]]['sa'][0] * xq
             beta_cov = torch.pow(self.gp_params[gp_params_keys[i-1]]['va'][0], 2)* torch.pow(xq, 2) * torch.eye(ids.shape[0]).to(self.device)
@@ -361,19 +350,16 @@ class VAE(nn.Module):
                 kvar = (self.gp_params[gp_params_keys[i-1]]['logkvar']).exp() + 0.1
                 sig = nn.Sigmoid()
                 ls = self.max_ls * sig((self.gp_params[gp_params_keys[i-1]]['log_ls']).exp() + 0.5)
-                gp_regressor = gp.GP(Xu, kvar, ls)
+                qu_m = self.gp_params[gp_params_keys[i-1]]['qu_m']
+                qu_S = self.gp_params[gp_params_keys[i-1]]['qu_S']
+                gp_regressor = gp.GP(Xu, kvar, ls, qu_m, qu_S)
                 #update loc, scale for beta distribution
-                f_bar, Sigma = gp_regressor.evaluate_posterior(xq, self.gp_params[gp_params_keys[i-1]]['qu_m'], \
-                self.gp_params[gp_params_keys[i-1]]['qu_S'])
+                f_bar, Sigma = gp_regressor.evaluate_posterior(xq)
                 beta_mean += f_bar
                 beta_cov += Sigma
                 #now get Kl  for non-linear GP term
-                qu = MultivariateNormal(self.gp_params[gp_params_keys[i-1]]['qu_m'], \
-                self.gp_params[gp_params_keys[i-1]]['qu_S'])
-                gp_kl = kl.kl_divergence(qu, self.pu)
+                gp_kl = gp_regressor.compute_GP_kl(self.so_sqrd, self.inducing_pts)
                 gp_loss += gp_kl
-            #torch.set_printoptions(threshold = 10000)
-            #print(beta_cov)
             beta_dist = MultivariateNormal(beta_mean, (beta_cov + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
             task_var = beta_dist.rsample()
             #convolve FULL scaling factor w/ HRF
@@ -412,7 +398,7 @@ class VAE(nn.Module):
         #contract all values using torch.mean()
         elbo = torch.mean(elbo, dim=0)
         #adding GP losses to VAE loss
-        tot_loss = -elbo + self.mll_scale*(-gp_loss) + self.l1_scale*(l1_reg)
+        tot_loss = -elbo + self.mll_scale*(gp_loss) + self.l1_scale*(l1_reg)
         if return_latent_rec:
             return tot_loss, z.detach().cpu().numpy(), imgs
         return tot_loss
@@ -422,6 +408,7 @@ class VAE(nn.Module):
     #only use this if trying to trace issues with auto-grad
     #otherwise, it will significantly slow code execution!
     def train_epoch(self, train_loader):
+        #self.print_gp_params()
         self.train()
         train_loss = 0.0
         #with autograd.detect_anomaly():
@@ -459,6 +446,11 @@ class VAE(nn.Module):
         print('Test loss: {:.4f}'.format(test_loss))
         return test_loss
 
+    def print_gp_params(self):
+        print('Printing gp_params for epoch {}'.format(self.epoch))
+        print(self.gp_params)
+        print('='*40)
+
     def save_state(self, filename):
         layers = self._get_layers()
         state = {}
@@ -474,6 +466,7 @@ class VAE(nn.Module):
         state['task_init'] = self.task_init
         state['beta_init'] = self.beta_init
         state['l1_scale'] = self.l1_scale
+        state['so_sqrd'] = self.so_sqrd
         #add GP nn params to checkpt files
         #this includes gp_params dict
         state['sa_task'] = self.sa_task
@@ -674,13 +667,14 @@ class VAE(nn.Module):
             kvar = (self.gp_params[regressors[i]]['logkvar']).exp() + 0.1
             sig = nn.Sigmoid()
             ls = self.max_ls * sig((self.gp_params[regressors[i]]['log_ls']).exp() + 0.5)
-            gp_regressor = gp.GP(xu, kvar, ls)
+            qu_m = self.gp_params[regressors[i]]['qu_m']
+            qu_S = self.gp_params[regressors[i]]['qu_S']
+            gp_regressor = gp.GP(xu, kvar, ls, qu_m, qu_S)
             #get all xi's for regressor
             covariates = all_covariates[:, i-1]
             xq = covariates.to(self.device)
             beta_diag = torch.pow(self.gp_params[regressors[i]]['va'][0], 2)* torch.pow(xq, 2) * torch.eye(xq.shape[0]).to(self.device)
-            f_bar, Sigma = gp_regressor.evaluate_posterior(xq, self.gp_params[regressors[i]]['qu_m'], \
-            self.gp_params[regressors[i]]['qu_S'])
+            f_bar, Sigma = gp_regressor.evaluate_posterior(xq)
             beta_mean = (self.gp_params[regressors[i]]['sa'][0] * xq) + f_bar
             beta_cov = beta_diag + Sigma
             #add vals to covar dict
