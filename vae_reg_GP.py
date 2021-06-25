@@ -31,6 +31,7 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
 from torch.distributions import LowRankMultivariateNormal, MultivariateNormal, Normal, kl
+from torch.utils.tensorboard import SummaryWriter
 #uncomment if needing to chase-down a nan in loss
 #from torch import autograd
 from umap import UMAP
@@ -719,11 +720,15 @@ class VAE(nn.Module):
         print("Training set:", len(loaders['train'].dataset))
         print("Test set:", len(loaders['test'].dataset))
         print("="*40)
+        #init summary writer
+        writer = SummaryWriter()
         # For some number of epochs...
         for epoch in range(self.epoch, self.epoch+epochs):
             #Run through the training data and record a loss.
             loss = self.train_epoch(loaders['train'])
             self.loss['train'][epoch] = loss
+            writer.add_scalar("Loss/Train", loss, self.epoch)
+            writer.flush()
             # Run through the test data and record a loss.
             if (test_freq is not None) and (epoch % test_freq == 0):
                 loss = self.test_epoch(loaders['test'])
@@ -733,6 +738,7 @@ class VAE(nn.Module):
                 filename = "checkpoint_"+str(epoch).zfill(3)+'.tar'
                 file_path = os.path.join(save_dir, filename)
                 self.save_state(file_path)
+        writer.close()
 
 if __name__ == "__main__":
     pass
