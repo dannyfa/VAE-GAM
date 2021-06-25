@@ -600,8 +600,13 @@ class VAE(nn.Module):
         #print(data_chunks)
         for i in data_chunks:
             t = np.arange(split)
+            #task = np.concatenate((np.zeros(14), np.ones(14)))
+            #task = np.tile(task, 3)
+            #task = np.concatenate((task, np.zeros(14)))
             plt.scatter(projection[i:i+split,0], projection[i:i+split,1],\
             color=next(colors), s=1.0, alpha=0.6)
+            #plt.scatter(projection[i:i+split,0], projection[i:i+split,1],\
+            #c=task, s=1.0, alpha=0.6)
             #commenting plot by time
             #plt.scatter(projection[i:i+split,0], projection[i:i+split,1], c=t, s=1.0, alpha=0.6)
             plt.axis('off')
