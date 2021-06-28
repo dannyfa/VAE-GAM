@@ -69,7 +69,7 @@ if __name__ == "__main__":
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, \
-	mll_scale = args.mll_scale, l1_scale=args.l1_scale)
+	mll_scale = args.mll_scale, l1_scale=args.l1_scale, save_dir = args.save_dir)
 	if args.from_ckpt == "True":
 		print('='*40)
 		print('Loading model state from: {}'.format(args.ckpt_path))
