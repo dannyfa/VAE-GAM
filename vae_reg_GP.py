@@ -312,7 +312,7 @@ class VAE(nn.Module):
         qk_kl = kl.kl_divergence(post_dist, prior_dist)
         return qk_kl
 
-    def forward(self, ids, covariates, x, return_latent_rec=False):
+    def forward(self, ids, covariates, x, return_latent_rec=False, train_mode=True):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
         'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
         imgs_keys = list(imgs.keys())
@@ -338,7 +338,8 @@ class VAE(nn.Module):
         x_rec = self.decode(zcat).view(x.shape[0], -1)
         imgs['base'] = x_rec.detach().cpu().numpy()
         #log base map
-        self.log_map(imgs['base'], 15, 'base_map', ids.shape[0])
+        if train_mode:
+            self.log_map(imgs['base'], 15, 'base_map', ids.shape[0])
         for i in range(1, (self.num_covariates+1)):
             cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
             dtype=torch.int64), self.num_covariates+1)
@@ -370,7 +371,8 @@ class VAE(nn.Module):
                 gp_loss += gp_kl
             beta_dist = MultivariateNormal(beta_mean, (beta_cov + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
             task_var = beta_dist.rsample()
-            self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1]) #add beta plot to TB
+            if train_mode:
+                self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1]) #add beta plot to TB
             #convolve FULL scaling factor w/ HRF
             #this is done for biological regressors only
             if i ==1:
@@ -390,7 +392,8 @@ class VAE(nn.Module):
             if i==1:
                 cons = cons + self.task_init.unsqueeze(0).contiguous().view(1, -1).expand(ids.shape[0], -1)
                 #log task map
-                self.log_map(cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0])
+                if train_mode:
+                    self.log_map(cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0])
             # am forcing l1 regularization on all maps (including motion ones)
             l1_loss = torch.norm(cons, p=1)
             l1_reg += l1_loss
@@ -398,7 +401,8 @@ class VAE(nn.Module):
             imgs[imgs_keys[i]] = cons.detach().cpu().numpy()
         imgs['full_rec']=x_rec.detach().cpu().numpy()
         #log full_rec to TB as well
-        self.log_map(imgs['full_rec'], 15, 'full_reconstruction', ids.shape[0])
+        if train_mode:
+            self.log_map(imgs['full_rec'], 15, 'full_reconstruction', ids.shape[0])
         # calculating loss for VAE ...
         elbo = -kl.kl_divergence(latent_dist, self.z_prior) #shape = batch_dim
         #obs_dist.shape = batch_dim, img_dim
@@ -453,7 +457,7 @@ class VAE(nn.Module):
                 covariates = covariates.to(self.device)
                 ids = sample['subjid']
                 ids = ids.to(self.device)
-                loss = self.forward(ids, covariates, x)
+                loss = self.forward(ids, covariates, x, train_mode=False)
                 test_loss += loss.item()
         test_loss /= len(test_loader.dataset)
         print('Test loss: {:.4f}'.format(test_loss))
@@ -633,7 +637,7 @@ class VAE(nn.Module):
         ids = item['subjid'].view(1)
         ids = ids.to(self.device)
         with torch.no_grad():
-            _, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True)
+            _, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True, train_mode=False)
             for key in imgs.keys():
                 filename = 'recon_{}.nii'.format(key)
                 filepath = os.path.join(save_dir, filename)
