@@ -38,11 +38,6 @@ class GP():
 
     def compute_GP_kl(self, so_sqrd, num_inducing_pts):
         """Computes kl for GP term """
-        #gp_kl = 0.5*(torch.reciprocal(so_sqrd)*torch.trace(self.qu_S))
-        #gp_kl += 0.5*(torch.reciprocal(so_sqrd)*torch.pow(torch.norm(self.qu_m, 2), 2))
-        #gp_kl += 0.5*(num_inducing_pts*torch.log(so_sqrd))
-        #gp_kl -= 0.5*(torch.logdet(self.qu_S))
-        #gp_kl -= 0.5*(num_inducing_pts)
         prior_dist = MultivariateNormal(torch.zeros(num_inducing_pts).to(self.device), \
         10*torch.eye(num_inducing_pts).to(self.device))
         post_dist = MultivariateNormal(self.qu_m, self.qu_S)

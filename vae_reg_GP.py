@@ -65,8 +65,8 @@ IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", task_init = '', \
-    num_inducing_pts=6, mll_scale=10.0, l1_scale=1.0):
+    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", \
+    num_inducing_pts=6, mll_scale=10.0, l1_scale=1.0, glm_maps = '', glm_reg_scale=1):
         super(VAE, self).__init__()
         self.nf = nf
         self.save_dir = save_dir
@@ -86,11 +86,10 @@ class VAE(nn.Module):
 		# -log(10) initial value accounts for removing model_precision term from original version
         epsilon = -np.log(10)*torch.ones([IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]], dtype=torch.float64, device = self.device)
         self.epsilon = torch.nn.Parameter(epsilon)
-		# init. task cons as a nn param
-		# am using variance scld avg of task effect map from SPM as init here.
-        # in future, this init will be removed.
-        self.beta_init = torch.FloatTensor(np.array(nib.load(task_init).dataobj)).to(self.device)
-        self.task_init = torch.nn.Parameter(self.beta_init)
+        #read in GLM maps for regularizer
+        glm_maps = pd.read_csv(glm_maps).to_numpy()
+        self.glm_maps = torch.from_numpy(glm_maps).to(self.device) #shape is 70, 315x8
+        self.glm_reg_scale = glm_reg_scale
         self.inducing_pts = num_inducing_pts
         self.mll_scale = torch.as_tensor((mll_scale)).to(self.device)
         # max_ls term is used to avoid ls from blowing up.
@@ -321,6 +320,8 @@ class VAE(nn.Module):
         gp_loss = 0
         #set L1 regularization term to zero
         l1_reg = 0
+        #set glm regularizer term to zero
+        glm_reg = 0
         #getting z's using encoder
         mu, u, d = self.encode(x)
         #check if d is not too small
@@ -376,9 +377,7 @@ class VAE(nn.Module):
             #convolve FULL scaling factor w/ HRF
             #this is done for biological regressors only
             if i ==1:
-                #if covariate is task...
-                #need to convolve (GP output + k * covariate) result with HRF
-                tr_times = np.arange(0, 20, 1.4) #TR==1.4 here
+                tr_times = np.arange(0, 20, 1.4) #TR==1.4 here, 20s block
                 hrf_at_trs = hrf(tr_times)
                 time_series = np.convolve(task_var.detach().cpu().numpy(), hrf_at_trs)
                 n_to_remove = len(hrf_at_trs) - 1
@@ -386,15 +385,13 @@ class VAE(nn.Module):
                 task_var = torch.FloatTensor(time_series).to(self.device)
             #use this to scale effect map
             cons = torch.einsum('b,bx->bx', task_var, diff)
-            #add cons to init_task param if covariate == 'task'
-            #implementation below was adopted to avoid in place ops that would cause autograd errors
-            #in future, this init piece will go away entirely
-            if i==1:
-                cons = cons + self.task_init.unsqueeze(0).contiguous().view(1, -1).expand(ids.shape[0], -1)
-                #log task map
-                if train_mode:
-                    self.log_map(cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0])
-            # am forcing l1 regularization on all maps (including motion ones)
+            if i==1 and train_mode==True:
+                self.log_map(cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0])
+            #force all maps to be close to their GLM approximations
+            #am using l2 norm here to enfoce this.
+            glm_diff = torch.sum(torch.cdist(cons, self.glm_maps[:, i].unsqueeze(0).expand(ids.shape[0], -1).float(), p=2))
+            glm_reg += glm_diff
+            # am keeping l1 reg too for now to impose sparsity on maps
             l1_loss = torch.norm(cons, p=1)
             l1_reg += l1_loss
             x_rec = x_rec + cons
@@ -415,7 +412,7 @@ class VAE(nn.Module):
         #contract all values using torch.mean()
         elbo = torch.mean(elbo, dim=0)
         #adding GP losses to VAE loss
-        tot_loss = -elbo + self.mll_scale*(gp_loss) + self.l1_scale*(l1_reg)
+        tot_loss = -elbo + self.mll_scale*(gp_loss) + self.l1_scale*(l1_reg) + self.glm_reg_scale*(glm_reg)
         if return_latent_rec:
             return tot_loss, z.detach().cpu().numpy(), imgs
         return tot_loss
@@ -475,10 +472,9 @@ class VAE(nn.Module):
         state['lr'] = self.lr
         state['save_dir'] = self.save_dir
         state['epsilon'] = self.epsilon
-        state['task_init'] = self.task_init
-        state['beta_init'] = self.beta_init
         state['l1_scale'] = self.l1_scale
         state['so_sqrd'] = self.so_sqrd
+        state['glm_reg_scale'] = self.glm_reg_scale
         #add GP nn params to checkpt files
         #this includes gp_params dict
         state['sa_task'] = self.sa_task
@@ -536,10 +532,9 @@ class VAE(nn.Module):
         self.loss = checkpoint['loss']
         self.epoch = checkpoint['epoch']
         self.epsilon = checkpoint['epsilon']
-        self.beta_init = checkpoint['beta_init']
-        self.task_init = checkpoint['task_init']
         self.l1_scale = checkpoint['l1_scale']
         self.so_sqrd = checkpoint['so_sqrd']
+        self.glm_reg_scale = checkpoint['glm_reg_scale']
         #load in GP params from ckpt files
         #and load gp_params dict - needed here (otherwise only initial values are plotted!)
         self.sa_task = checkpoint['sa_task']

@@ -33,13 +33,12 @@ parser.add_argument('--test_freq', type=int, default=100, metavar='N', \
 help='How many batches to wait before testing')
 parser.add_argument('--split', type=int, metavar='N', default=98, \
 help='split # for project latent method. This is # of frames in each dset.')
-#adding initial task map argument & regularization scale args
-parser.add_argument('--task_init', type=str, metavar='N', default='', \
-help='Path to beta map used to init task contrast in model.')
 parser.add_argument('--l1_scale', type=float, metavar='N', default=0.05, \
 help='Scaling factor for task map L1 regularization term.')
-#adding args for number of inducing points for GPs and mll scale
-#these are mostly useful for troubleshooting GP Training
+parser.add_argument('--glm_reg_scale', type=float, metavar='N', default=1.0, \
+help='Scaling factor for GLM map regularization term.')
+parser.add_argument('--glm_maps', type=str, metavar='N', default='', \
+help='Path to csv file containing matrix with GLM maps for regressors.')
 parser.add_argument('--num_inducing_pts', type=int, metavar='N', default=6, \
 help='Number of inducing points for regressor GPs.')
 parser.add_argument('--mll_scale', type=float, metavar='N', default=10.0, \
@@ -68,8 +67,8 @@ if __name__ == "__main__":
 	main_start = time.time()
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
-	model = vae_reg.VAE(task_init = args.task_init, num_inducing_pts = args.num_inducing_pts, \
-	mll_scale = args.mll_scale, l1_scale=args.l1_scale, save_dir = args.save_dir)
+	model = vae_reg.VAE(num_inducing_pts = args.num_inducing_pts, mll_scale = args.mll_scale, l1_scale=args.l1_scale, \
+	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir)
 	if args.from_ckpt == "True":
 		print('='*40)
 		print('Loading model state from: {}'.format(args.ckpt_path))
