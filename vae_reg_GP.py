@@ -311,7 +311,7 @@ class VAE(nn.Module):
         qk_kl = kl.kl_divergence(post_dist, prior_dist)
         return qk_kl
 
-    def forward(self, ids, covariates, x, return_latent_rec=False, train_mode=True):
+    def forward(self, ids, covariates, x, log_type, return_latent_rec=False, train_mode=True):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
         'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
         imgs_keys = list(imgs.keys())
@@ -340,7 +340,10 @@ class VAE(nn.Module):
         imgs['base'] = x_rec.detach().cpu().numpy()
         #log base map
         if train_mode:
-            self.log_map(imgs['base'], 15, 'base_map', ids.shape[0])
+            #log slices 12, 15, 18 for all batch elem
+            self.log_map(imgs['base'], 12, 'base_map', ids.shape[0], log_type)
+            self.log_map(imgs['base'], 15, 'base_map', ids.shape[0], log_type)
+            self.log_map(imgs['base'], 18, 'base_map', ids.shape[0], log_type)
         for i in range(1, (self.num_covariates+1)):
             cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
             dtype=torch.int64), self.num_covariates+1)
@@ -373,20 +376,24 @@ class VAE(nn.Module):
             beta_dist = MultivariateNormal(beta_mean, (beta_cov + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
             task_var = beta_dist.rsample()
             if train_mode:
-                self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1]) #add beta plot to TB
+                self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1], log_type) #add beta plot to TB
+            #SKIP CONV -- maps might not be great BUT we should still get something reasonable
+            #AND without weird zeroed 0, 1st batch items
             #convolve FULL scaling factor w/ HRF
             #this is done for biological regressors only
-            if i ==1:
-                tr_times = np.arange(0, 20, 1.4) #TR==1.4 here, 20s block
-                hrf_at_trs = hrf(tr_times)
-                time_series = np.convolve(task_var.detach().cpu().numpy(), hrf_at_trs)
-                n_to_remove = len(hrf_at_trs) - 1
-                time_series = time_series[:-n_to_remove]
-                task_var = torch.FloatTensor(time_series).to(self.device)
+            #if i ==1:
+            #    tr_times = np.arange(0, 20, 1.4) #TR==1.4 here, 20s block
+            #    hrf_at_trs = hrf(tr_times)
+            #    time_series = np.convolve(task_var.detach().cpu().numpy(), hrf_at_trs)
+            #    n_to_remove = len(hrf_at_trs) - 1
+            #    time_series = time_series[:-n_to_remove]
+            #    task_var = torch.FloatTensor(time_series).to(self.device)
             #use this to scale effect map
             cons = torch.einsum('b,bx->bx', task_var, diff)
             if i==1 and train_mode==True:
-                self.log_map(cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0])
+                self.log_map(cons.detach().cpu().numpy(), 12, 'task_map', ids.shape[0], log_type)
+                self.log_map(cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0], log_type)
+                self.log_map(cons.detach().cpu().numpy(), 18, 'task_map', ids.shape[0], log_type)
             #force all maps to be close to their GLM approximations
             #am using l2 norm here to enfoce this.
             glm_diff = torch.sum(torch.cdist(cons, self.glm_maps[:, i].unsqueeze(0).expand(ids.shape[0], -1).float(), p=2))
@@ -399,7 +406,9 @@ class VAE(nn.Module):
         imgs['full_rec']=x_rec.detach().cpu().numpy()
         #log full_rec to TB as well
         if train_mode:
-            self.log_map(imgs['full_rec'], 15, 'full_reconstruction', ids.shape[0])
+            self.log_map(imgs['full_rec'], 12, 'full_reconstruction', ids.shape[0], log_type)
+            self.log_map(imgs['full_rec'], 15, 'full_reconstruction', ids.shape[0], log_type)
+            self.log_map(imgs['full_rec'], 18, 'full_reconstruction', ids.shape[0], log_type)
         # calculating loss for VAE ...
         elbo = -kl.kl_divergence(latent_dist, self.z_prior) #shape = batch_dim
         #obs_dist.shape = batch_dim, img_dim
@@ -433,7 +442,7 @@ class VAE(nn.Module):
             covariates = covariates.to(self.device)
             ids = sample['subjid']
             ids = ids.to(self.device)
-            loss = self.forward(ids, covariates, x)
+            loss = self.forward(ids, covariates, x, 'train', train_mode=True)
             train_loss += loss.item()
             self.optimizer.zero_grad()
             loss.backward()
@@ -454,7 +463,7 @@ class VAE(nn.Module):
                 covariates = covariates.to(self.device)
                 ids = sample['subjid']
                 ids = ids.to(self.device)
-                loss = self.forward(ids, covariates, x, train_mode=False)
+                loss = self.forward(ids, covariates, x, 'test', train_mode=False)
                 test_loss += loss.item()
         test_loss /= len(test_loader.dataset)
         print('Test loss: {:.4f}'.format(test_loss))
@@ -632,7 +641,7 @@ class VAE(nn.Module):
         ids = item['subjid'].view(1)
         ids = ids.to(self.device)
         with torch.no_grad():
-            _, _, imgs = self.forward(ids, covariates, x, return_latent_rec = True, train_mode=False)
+            _, _, imgs = self.forward(ids, covariates, x, 'reconstruction', return_latent_rec = True, train_mode=False)
             for key in imgs.keys():
                 filename = 'recon_{}.nii'.format(key)
                 filepath = os.path.join(save_dir, filename)
@@ -726,7 +735,7 @@ class VAE(nn.Module):
         covariate_mean_vars_data = pd.DataFrame.from_dict(covariates_mean_vars)
         covariate_mean_vars_data.to_csv(os.path.join(plot_dir, outcsv_name))
 
-    def log_qu_plots(self):
+    def log_qu_plots(self, log_type):
         """
         Creates q(u) plots which can be passed as figs
         to TB.
@@ -810,9 +819,9 @@ class VAE(nn.Module):
         axs[2,1].set_ylabel('q(u)')
 
         #and pass it to writer
-        self.writer.add_figure("q(u)", fig)
+        self.writer.add_figure("q(u)_{}".format(log_type), fig)
 
-    def log_qkappa_plots(self):
+    def log_qkappa_plots(self, log_type):
         """
         Logs q(k) to tensorboard.
         Plots only posterior --> prior is N(1, 0.5).
@@ -879,9 +888,9 @@ class VAE(nn.Module):
         axs[2,0].plot(x_zrot, y_zrot, lw=2, alpha = 0.5, color = 'purple')
         axs[2,0].set_title('Zrot q(k)')
         #pass it to tb writer
-        self.writer.add_figure("q(k)", fig)
+        self.writer.add_figure("q(k)_{}".format(log_type), fig)
 
-    def log_beta(self, xq, beta_mean, beta_cov, covariate_name):
+    def log_beta(self, xq, beta_mean, beta_cov, covariate_name, log_type):
         """
         Logs beta dist plots to TB.
         This is done from within fwd method.
@@ -905,9 +914,9 @@ class VAE(nn.Module):
         plt.title('Beta_{}'.format(covariate_name))
         plt.xlabel('Covariate')
         plt.ylabel('Beta Ouput')
-        self.writer.add_figure("Beta/{}".format(covariate_name), fig)
+        self.writer.add_figure("Beta/{}_{}".format(covariate_name, log_type), fig)
 
-    def log_map(self, map, slice, map_name, batch_size):
+    def log_map(self, map, slice, map_name, batch_size, log_type):
         """
         Logs a particular brain map to TB.
         Args
@@ -922,11 +931,12 @@ class VAE(nn.Module):
         For now am logging slices only in saggital view.
         """
         map = map.reshape((batch_size, IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
-        #am picking just one slc here...
-        #tb gives me an odd error when I try adding entire batch :(
-        slc = map[5, slice, :, :]
-        slc = ndimage.rotate(slc, 90)
-        self.writer.add_image(map_name, slc, dataformats='HW')
+        for i in range(batch_size):
+            slc = map[i, slice, :, :]
+            slc = ndimage.rotate(slc, 90)
+            fig_name = '{}_{}_{}/{}'.format(map_name, log_type, slice, i)
+            self.writer.add_image(fig_name, slc, dataformats='HW')
+
 
     def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
         print("="*40)
@@ -940,8 +950,8 @@ class VAE(nn.Module):
             loss = self.train_epoch(loaders['train'])
             self.loss['train'][epoch] = loss
             self.writer.add_scalar("Loss/Train", loss, self.epoch)
-            self.log_qu_plots()
-            self.log_qkappa_plots()
+            self.log_qu_plots('train')
+            self.log_qkappa_plots('train')
             self.writer.flush()
             # Run through the test data and record a loss.
             if (test_freq is not None) and (epoch % test_freq == 0):
