@@ -46,10 +46,8 @@ import datetime
 from scipy.stats import norm
 from scipy import ndimage
 
-#define HRF here ...
-#should  be able to import it though from preproc module
-#HRF funct.
-def hrf(times):
+#OLD HRF
+def hrf1(times):
     """ Return values for HRF at given times """
     # Gamma pdf for the peak
     peak_values = gamma.pdf(times, 6)
@@ -59,6 +57,17 @@ def hrf(times):
     values = peak_values - 0.35 * undershoot_values
     # Scale max to 0.6
     return values / np.max(values) * 0.6
+
+#HRF (as implemented in FSL)
+#only diff here is scaling to max 0.6
+#sometime of scaling will likely be needed here -- for stability purposes
+def hrf2(times):
+    """ Return values for HRF at given times """
+    peak_values = gamma.pdf(times, 6, scale=(2.449*2.449))
+    undershoot_values = gamma.pdf(times, 16, scale=(4*4))
+    values = peak_values - 0.167*undershoot_values
+    #once again, scale max to 0.6
+    return values / np.max(values)*0.6
 
 # maintained shape of original nn by downsampling data on preprocessing
 IMG_SHAPE = (41,49,35)
@@ -311,6 +320,44 @@ class VAE(nn.Module):
         qk_kl = kl.kl_divergence(post_dist, prior_dist)
         return qk_kl
 
+    def do_hrf_conv(self, input, hrf_type, scale_factor=20):
+        """
+        Takes an input tensor, upsamples it by some scale_factor.
+        Then convolves upsampled vector with HRF of a given type.
+        And then returns downsampled result to be used.
+        ------
+        Args:
+        input: torch.tensor
+        This is series of 0's or 1's corresponding to binary task variable
+        for each bath entry
+        hrf_type: str
+        Type of HRF to be used. Can be hrf1 -- old HRF implementation OR
+        hrf2, which uses delays, sigmas and ratio as being the same as for
+        FSL's double gamma HRF.
+        scale_factor: float
+        Factor by which we will upsample input. To downsample, this implementation
+        uses 1/scale_factor.
+        """
+        #upsample input
+        upsampled_input = F.interpolate(input.unsqueeze(0).unsqueeze(0), size=[scale_factor*input.shape[0]], mode='linear', align_corners=True).to(self.device)
+        #doing HRF at 0.1 res.. This can be made smaller
+        hrf_times = np.arange(0, 20, 0.1)
+        if hrf_type == 'hrf1':
+            hrf_signal = torch.tensor(hrf1(hrf_times)).to(self.device)
+        else:
+            hrf_signal = torch.tensor(hrf2(hrf_times)).to(self.device)
+        #now create tensor to carry conv step
+        n_time_pts = upsampled_input.shape[2]
+        n_hrf_times = hrf_times.shape[0]
+        shifted_hrfs = torch.zeros((n_time_pts, (n_time_pts+n_hrf_times-1))).to(self.device)
+        for i in range(n_time_pts):
+            shifted_hrfs[i, i : i + n_hrf_times] = hrf_signal
+        convolved_signal = torch.mm(upsampled_input.squeeze(0), shifted_hrfs)
+        #now downsample this result
+        downsampled_output = F.interpolate(convolved_signal.unsqueeze(0), size=[input.shape[0] + 1], align_corners= True, mode='linear')
+        #for now am chopping out first entry in output (this will always be zero d/t way in which conv is being carried out...)
+        return downsampled_output[0, 0, 1:]
+
     def forward(self, ids, covariates, x, log_type, return_latent_rec=False, train_mode=True):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
         'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
@@ -377,17 +424,9 @@ class VAE(nn.Module):
             task_var = beta_dist.rsample()
             if train_mode:
                 self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1], log_type) #add beta plot to TB
-            #SKIP CONV -- maps might not be great BUT we should still get something reasonable
-            #AND without weird zeroed 0, 1st batch items
-            #convolve FULL scaling factor w/ HRF
-            #this is done for biological regressors only
-            #if i ==1:
-            #    tr_times = np.arange(0, 20, 1.4) #TR==1.4 here, 20s block
-            #    hrf_at_trs = hrf(tr_times)
-            #    time_series = np.convolve(task_var.detach().cpu().numpy(), hrf_at_trs)
-            #    n_to_remove = len(hrf_at_trs) - 1
-            #    time_series = time_series[:-n_to_remove]
-            #    task_var = torch.FloatTensor(time_series).to(self.device)
+            #apply HRF conv to biological regressor
+            if i ==1:
+                task_var = self.do_hrf_conv(task_var, hrf_type='hrf1')
             #use this to scale effect map
             cons = torch.einsum('b,bx->bx', task_var, diff)
             if i==1 and train_mode==True:
@@ -632,26 +671,41 @@ class VAE(nn.Module):
         #Uncomment this if we actually wish to get latent and projections
         #return latent, projection
 
-    def reconstruct(self, item, ref_nii, save_dir):
-        """Reconstruct a volume and its cons given a dset idx."""
-        x = item['volume'].unsqueeze(0)
-        x = x.to(self.device)
-        covariates = item['covariates'].unsqueeze(0)
-        covariates = covariates.to(self.device)
-        ids = item['subjid'].view(1)
-        ids = ids.to(self.device)
+    def reconstruct(self, loader, ref_niis, save_dirs):
+        """Reconstructs a batch of volumes
+        ------
+        Args:
+        loader: torch.DataLoader
+        ref_niis: list with paths to reference nifti files for each subj.
+        These are used to trf numpy arrays into final nifti format maps.
+        save_dir: root dir where vols will be saved to. Ends with subjid.
+        """
         with torch.no_grad():
-            _, _, imgs = self.forward(ids, covariates, x, 'reconstruction', return_latent_rec = True, train_mode=False)
-            for key in imgs.keys():
-                filename = 'recon_{}.nii'.format(key)
-                filepath = os.path.join(save_dir, filename)
-                reconstructed = imgs[key]
-                recon_array = reconstructed.reshape(41,49,35)
-                #use nibabel to load in header and affine of filename
-                #call that when writing recon_nifti
-                input_nifti = nib.load(ref_nii)
-                recon_nifti = nib.Nifti1Image(recon_array, input_nifti.affine, input_nifti.header)
-                nib.save(recon_nifti, filepath)
+            for i, sample in enumerate(loader):
+                x = sample['volume']
+                x = x.to(self.device)
+                covariates = sample['covariates']
+                covariates = covariates.to(self.device)
+                ids = sample['subjid']
+                ids = ids.to(self.device)
+                vol_num = sample['vol_num']
+                subjidx = sample['subjid']
+                _, _, imgs = self.forward(ids, covariates, x, 'reconstruction', return_latent_rec = True, train_mode=False)
+                for key in imgs.keys():
+                    gen_filename = 'recon_{}.nii'.format(key)
+                    for i in range(ids.shape[0]):
+                        curr_recon = imgs[key][i, :].reshape(41, 49, 35)
+                        curr_vol = vol_num.tolist()[i]
+                        curr_subjidx = subjidx.tolist()[i]
+                        curr_savedir = save_dirs[curr_subjidx]
+                        vol_dir = os.path.join(curr_savedir, 'vol_{}'.format(curr_vol))
+                        if not os.path.exists(vol_dir):
+                            os.makedirs(vol_dir)
+                        filepath = os.path.join(vol_dir, gen_filename)
+                        ref_nii = ref_niis[curr_subjidx]
+                        input_nifti = nib.load(ref_nii)
+                        recon_nifti = nib.Nifti1Image(curr_recon, input_nifti.affine, input_nifti.header)
+                        nib.save(recon_nifti, filepath)
 
     def plot_GPs(self, csv_file = '', save_dir = ''):
         """

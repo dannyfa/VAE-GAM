@@ -12,9 +12,9 @@ import numpy as np
 import nibabel as nib
 import pandas as pd
 
-def mk_single_volumes(dataset, model, csv_file, save_dir):
+def mk_single_volumes(loader, model, csv_file, save_dir):
     """
-    Creates model's single volume reconstructions for base, regressor and full reconstruction.
+    Creates model's single volume reconstructions for base, regressors and full reconstruction.
     Args:
       dataset :: a torch dataset object (instantiated in wrapper script).
       model :: a VAE_GP model object (instantiated in wrapper script).
@@ -27,25 +27,15 @@ def mk_single_volumes(dataset, model, csv_file, save_dir):
     ref_niis = dset.nii_path.unique().tolist()
     #get model epoch #
     ckpt_num = str(model.epoch).zfill(3)
+    subj_dirs = []
     for i in range(len(subjs)):
-        #get corresponding reference nifti files
-        subj_ref_nii = ref_niis[i]
         #create subj directory for single volume reconstructions
         subj_dir = os.path.join(save_dir, 'reconstructions', \
         '{}_model_recons'.format(ckpt_num), subjs[i])
         os.makedirs(subj_dir)
-        #generate model reconstructions for each vol and each subj
-        for idx in range(dataset.__len__()):
-            if dset.iloc[idx, 1] == subjs[i]:
-                item = dataset.__getitem__(idx)
-                vol_num = dset.iloc[idx,2]
-                task_bin = dset.iloc[idx,7] #see if worth splitting volumes differently in future?
-                ext = 'vol'+ str(vol_num) + '_' + 'task' + str(task_bin)
-                filepath = os.path.join(subj_dir, ext)
-                os.makedirs(filepath)
-                model.reconstruct(item, ref_nii= subj_ref_nii, save_dir= filepath)
-            else:
-                pass
+        subj_dirs.append(subj_dir)
+    #generate model reconstructions
+    model.reconstruct(loader, ref_niis, subj_dirs)
 
 def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
     """
@@ -79,10 +69,7 @@ def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
     #create dict to hold grand avg maps
     gd_avg_maps = {}
     for l in maps:
-        #create name for null maps where task == 0
-        null_map = 'null' + '_' + l
         gd_avg_maps[l] = np.zeros((41, 49, 35),np.float)
-        gd_avg_maps[null_map] = np.zeros((41, 49, 35),np.float)
         #build single subj avg maps
         for i in range(len(subjs)):
             subj_sngl_vols_dir = os.path.join(sngl_vols_dir, subjs[i])
@@ -92,36 +79,25 @@ def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
                 os.makedirs(subj_avg_vols_dir)
             #create dict for subj-level avg maps
             subj_maps = {}
+            vol_count = 0
             subj_maps[l] = np.zeros((41, 49, 35),np.float)
-            subj_maps[null_map] = np.zeros((41, 49, 35),np.float)
-            #init counter for task volumes
-            task_vols = 0
             for k in subj_vol_dirs:
                 vol_path = os.path.join(subj_sngl_vols_dir, k, 'recon_{}.nii'.format(l))
                 vol = np.array(nib.load(vol_path).dataobj)
-                if k[-1] == '1':
-                    subj_maps[l] += vol
-                    task_vols += 1
-                else:
-                    subj_maps[null_map] += vol
+                subj_maps[l] += vol
+                vol_count += 1
             #compute subj avg for jth regressor
-            notask_vols = len(subj_vol_dirs)-task_vols
-            subj_maps[l] /=  task_vols
-            subj_maps[null_map] /= notask_vols
+            subj_maps[l] /=  vol_count
             #save subj-level maps
             _save_map(subj_maps[l], ref_niis[i], subj_avg_vols_dir, l)
-            _save_map(subj_maps[null_map], ref_niis[i], subj_avg_vols_dir, null_map)
             #update gd avg maps
             gd_avg_maps[l] += subj_maps[l]
-            gd_avg_maps[null_map] += subj_maps[null_map]
         #calc grand avg maps
         gd_avg_maps[l] /= len(subjs)
-        gd_avg_maps[null_map] /= len(subjs)
         #save grand maps
         #am using zeroth nifti file as Reference
         #however, any file in list is ok since subjs are warped to common space
         _save_map(gd_avg_maps[l], ref_niis[0], avg_vols_dir, l)
-        _save_map(gd_avg_maps[null_map], ref_niis[0], avg_vols_dir, null_map)
 
 def _save_map(map, reference, save_dir, ext):
     """

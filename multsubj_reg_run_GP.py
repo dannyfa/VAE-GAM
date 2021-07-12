@@ -78,9 +78,9 @@ if __name__ == "__main__":
 		save_freq = args.save_freq, save_dir=args.save_dir)
 	model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
 	model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
-	recon.mk_single_volumes(fMRI_data, model, args.csv_file, args.save_dir)
+	recon.mk_single_volumes(loaders_dict['test'], model, args.csv_file, args.save_dir) #using test loader here b/c it is unshuffled
 	recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = True)
 	#run post-processing to zero GP means!!
-	post_proc.run_postproc(model, args.save_dir, args.gp_cutoff)
+	#post_proc.run_postproc(model, args.save_dir, args.gp_cutoff)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))
