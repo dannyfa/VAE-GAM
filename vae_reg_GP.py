@@ -339,7 +339,8 @@ class VAE(nn.Module):
         uses 1/scale_factor.
         """
         #upsample input
-        upsampled_input = F.interpolate(input.unsqueeze(0).unsqueeze(0), size=[scale_factor*input.shape[0]], mode='linear', align_corners=True).to(self.device)
+        upsampled_input = F.interpolate(input.unsqueeze(0).unsqueeze(0), size=[scale_factor*input.shape[0]], \
+        mode='linear', align_corners=True).to(self.device)
         #doing HRF at 0.1 res.. This can be made smaller
         hrf_times = np.arange(0, 20, 0.1)
         if hrf_type == 'hrf1':
@@ -352,11 +353,15 @@ class VAE(nn.Module):
         shifted_hrfs = torch.zeros((n_time_pts, (n_time_pts+n_hrf_times-1))).to(self.device)
         for i in range(n_time_pts):
             shifted_hrfs[i, i : i + n_hrf_times] = hrf_signal
+        #carry out convolution
         convolved_signal = torch.mm(upsampled_input.squeeze(0), shifted_hrfs)
         #now downsample this result
-        downsampled_output = F.interpolate(convolved_signal.unsqueeze(0), size=[input.shape[0] + 1], align_corners= True, mode='linear')
-        #for now am chopping out first entry in output (this will always be zero d/t way in which conv is being carried out...)
-        return downsampled_output[0, 0, 1:]
+        downsampled_output = F.interpolate(convolved_signal.unsqueeze(0), size=[input.shape[0]], \
+        align_corners= True, mode='linear')
+        #and scale it so that max allowed is 2.5 (this should be +/- 3 std from mean assuming kappa = N(1, 0.5))
+        max_downsampled_signal = np.amax(downsampled_output[0, 0, :].detach().cpu().numpy()) #no need to compute grads for this op...
+        scld_downsampled_signal = (downsampled_output[0, 0, :]/max_downsampled_signal) * 2.5
+        return scld_downsampled_signal
 
     def forward(self, ids, covariates, x, log_type, return_latent_rec=False, train_mode=True):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
