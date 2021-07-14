@@ -25,8 +25,8 @@ class GP():
         ls : float
         Lengthscale for Gaussian kernel. Trainable.
         """
-        device_name = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = torch.device(device_name)
+        #device_name = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device("cuda:1")
         self.n = Xu.shape[0]
         assert len(Xu) > 1
         self.step = Xu[1] - Xu[0]
@@ -79,7 +79,7 @@ class GP():
             knn[i, :] = diff
         knn = _distance_to_kernel(knn, self.k_var, self.ls)
         #get Ku --> mat formed by evaluating kernel at each pair of inducing pts
-        ku = _striped_matrix(self.n)
+        ku = _striped_matrix(self.n).to(self.device)
         ku = _distance_to_kernel(ku, self.k_var, self.ls, self.step)
         #now get Sigma and f_bar
         A = knu.T @ torch.inverse(ku)
