@@ -99,7 +99,7 @@ for i in range(len(subjs)):
     full_path = os.path.join(args.data_dir, subjs[i])
     for data_file in Path(full_path).rglob('sub-A000*_preproc_bold_brainmasked_resampled.nii.gz'):
         raw_data_files.append(str(data_file))
-    for reg_file in Path(full_path).rglob('sub-A000*_ses-NFB2_task-CHECKERBOARD_acq-1400_desc-confounds_regressors.tsv'):
+    for reg_file in Path(full_path).rglob('sub-A000*_task-CHECKERBOARD_acq-1400_desc-confounds_regressors_*.tsv'):
         raw_reg_files.append(str(reg_file))
 
 #creating raw_df

@@ -320,42 +320,42 @@ class VAE(nn.Module):
         qk_kl = kl.kl_divergence(post_dist, prior_dist)
         return qk_kl
 
-    def do_hrf_conv(self, input, hrf_type, scale_factor=20):
-        """
-        Takes an input tensor, upsamples it by some scale_factor.
-        Then convolves upsampled vector with HRF of a given type.
-        And then returns downsampled result to be used.
-        ------
-        Args:
-        input: torch.tensor
-        This is series of 0's or 1's corresponding to binary task variable
-        for each bath entry
-        hrf_type: str
-        Type of HRF to be used. Can be hrf1 -- old HRF implementation OR
-        hrf2, which uses delays, sigmas and ratio as being the same as for
-        FSL's double gamma HRF.
-        scale_factor: float
-        Factor by which we will upsample input. To downsample, this implementation
-        uses 1/scale_factor.
-        """
+    #def do_hrf_conv(self, input, hrf_type, scale_factor=20):
+    #    """
+    #    Takes an input tensor, upsamples it by some scale_factor.
+    #    Then convolves upsampled vector with HRF of a given type.
+    #    And then returns downsampled result to be used.
+    #    ------
+    #    Args:
+    #    input: torch.tensor
+    #    This is series of 0's or 1's corresponding to binary task variable
+    #    for each bath entry
+    #    hrf_type: str
+    #    Type of HRF to be used. Can be hrf1 -- old HRF implementation OR
+    #    hrf2, which uses delays, sigmas and ratio as being the same as for
+    #    FSL's double gamma HRF.
+    #    scale_factor: float
+    #    Factor by which we will upsample input. To downsample, this implementation
+    #    uses 1/scale_factor.
+    #    """
         #doing HRF at TR res..
-        hrf_times = np.arange(0, 20, 1.4)
-        if hrf_type == 'hrf1':
-            hrf_signal = torch.tensor(hrf1(hrf_times)).to(self.device)
-        else:
-            hrf_signal = torch.tensor(hrf2(hrf_times)).to(self.device)
+    #    hrf_times = np.arange(0, 20, 1.4)
+    #    if hrf_type == 'hrf1':
+    #        hrf_signal = torch.tensor(hrf1(hrf_times)).to(self.device)
+    #    else:
+    #        hrf_signal = torch.tensor(hrf2(hrf_times)).to(self.device)
         #now create tensor to carry conv step
-        n_time_pts = input.shape[0]
-        n_hrf_times = hrf_times.shape[0]
-        shifted_hrfs = torch.zeros((n_time_pts, (n_time_pts+n_hrf_times-1))).to(self.device)
-        for i in range(n_time_pts):
-            shifted_hrfs[i, i : i + n_hrf_times] = hrf_signal
+    #    n_time_pts = input.shape[0]
+    #    n_hrf_times = hrf_times.shape[0]
+    #    shifted_hrfs = torch.zeros((n_time_pts, (n_time_pts+n_hrf_times-1))).to(self.device)
+    #    for i in range(n_time_pts):
+    #        shifted_hrfs[i, i : i + n_hrf_times] = hrf_signal
         #carry out convolution
-        convolved_signal = torch.mm(input.unsqueeze(0), shifted_hrfs)
+    #    convolved_signal = torch.mm(input.unsqueeze(0), shifted_hrfs)
         #take out extra vals and return tensor of appropriate shape/size
-        len_to_remove = len(hrf_times) - 1
-        convolved_signal = convolved_signal.squeeze(0)[:-len_to_remove]
-        return convolved_signal
+    #    len_to_remove = len(hrf_times) - 1
+    #    convolved_signal = convolved_signal.squeeze(0)[:-len_to_remove]
+    #    return convolved_signal
 
     def forward(self, ids, covariates, x, log_type, return_latent_rec=False, train_mode=True):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
@@ -424,8 +424,8 @@ class VAE(nn.Module):
             if train_mode:
                 self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1], log_type) #add beta plot to TB
             #apply HRF conv to biological regressor
-            if i ==1:
-                task_var = self.do_hrf_conv(task_var, hrf_type='hrf1')
+            #if i ==1:
+            #    task_var = self.do_hrf_conv(task_var, hrf_type='hrf1')
             #use this to scale effect map
             cons = torch.einsum('b,bx->bx', task_var, diff)
             if i==1 and train_mode==True:
