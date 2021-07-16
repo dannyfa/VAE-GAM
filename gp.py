@@ -25,8 +25,8 @@ class GP():
         ls : float
         Lengthscale for Gaussian kernel. Trainable.
         """
-        #device_name = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = torch.device("cuda:1")
+        device_name = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device("cuda")
         self.n = Xu.shape[0]
         assert len(Xu) > 1
         self.step = Xu[1] - Xu[0]

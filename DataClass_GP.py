@@ -39,19 +39,16 @@ class FMRIDataset(Dataset):
         #vol # and nii path
         vol_num = self.df.iloc[idx,2]
         nii = self.df.iloc[idx,3]
-        #age, sex
-        age = self.df.iloc[idx,4]
-        sex = self.df.iloc[idx,5]
         #convolved and bin task_bin
-        task = self.df.iloc[idx,6]
-        task_bin = self.df.iloc[idx,7]
+        task = self.df.iloc[idx,4]
+        task_bin = self.df.iloc[idx,5]
         #motion params
-        trans_x = self.df.iloc[idx,8]
-        trans_y = self.df.iloc[idx,9]
-        trans_z = self.df.iloc[idx,10]
-        rot_x = self.df.iloc[idx,11]
-        rot_y = self.df.iloc[idx,12]
-        rot_z = self.df.iloc[idx,13]
+        trans_x = self.df.iloc[idx,6]
+        trans_y = self.df.iloc[idx,7]
+        trans_z = self.df.iloc[idx,8]
+        rot_x = self.df.iloc[idx,9]
+        rot_y = self.df.iloc[idx,10]
+        rot_z = self.df.iloc[idx,11]
 
         fmri = np.array(nib.load(nii).dataobj)
         max = 3284.5 # min is zero! This simplifies norm calc -- becomes x/xmax
@@ -61,10 +58,9 @@ class FMRIDataset(Dataset):
         norm_vol = np.true_divide(flat_vol, max).reshape(41,49,35)
         #added vol_num to sample
         sample = {'subjid': subj_idx, 'volume': norm_vol, 'vol_num':vol_num,
-                      'age': age, 'sex': sex, 'task':task,'subj': subjid,
-                      'task_bin':task_bin, 'trans_x':trans_x, 'trans_y':trans_y,
-                      'trans_z':trans_z, 'rot_x':rot_x, 'rot_y':rot_y,
-                      'rot_z':rot_z}
+                  'task':task,'subj': subjid, 'task_bin':task_bin, 'trans_x':trans_x,
+                  'trans_y':trans_y, 'trans_z':trans_z, 'rot_x':rot_x, 'rot_y':rot_y,
+                  'rot_z':rot_z}
         if self.transform:
             sample = self.transform(sample)
 

@@ -102,30 +102,8 @@ for i in range(len(subjs)):
     for reg_file in Path(full_path).rglob('sub-A000*_ses-NFB2_task-CHECKERBOARD_acq-1400_desc-confounds_regressors.tsv'):
         raw_reg_files.append(str(reg_file))
 
-#getting age and gender for subjs in data_dir
-#this will likely not be needed in future...
-demos_file = os.path.join(args.data_dir,'participants.tsv')
-subj_demos = pd.read_csv(demos_file, sep='\t', index_col=False)
-#getting stripped subjIDs
-striped = [subjs[i][4:] for i in range(len(subjs))]
-#getting age and sex lists
-age_list = []
-sex_list = []
-for i in striped:
-    age = subj_demos.loc[subj_demos['participant_id'] == i, 'age'].iloc[0]
-    age_list.append(age)
-    sex = subj_demos.loc[subj_demos['participant_id'] == i, 'sex'].iloc[0]
-    sex_list.append(sex)
-#convert sex to binary inputs
-sex_bin = [1 if i=='FEMALE' else 0 for i in sex_list]
-#print(len(sex_bin))
-#normalize age values
-age_array = np.array(age_list)
-normalized_age = preprocessing.normalize([age_array]).tolist()[0]
-#print(len(normalized_age))
-
 #creating raw_df
-raw_df = {'nii_files': raw_data_files, 'subjs': subjs, 'age': normalized_age, 'sex': sex_bin, 'regressors': raw_reg_files}
+raw_df = {'nii_files': raw_data_files, 'subjs': subjs, 'regressors': raw_reg_files}
 raw_df = pd.DataFrame(raw_df)
 
 #HRF funct.
@@ -227,13 +205,7 @@ samples = []
 for i in raw_df['subjs']:
     #getting subjid, age, sex, path to raw nii files
     subjid = i
-    age = raw_df.loc[raw_df['subjs'] == i, 'age'].iloc[0]
-    sex = raw_df.loc[raw_df['subjs'] == i, 'sex'].iloc[0]
     #get motion params ...
-    #if using SPM files ...
-    #mot_file_path = os.path.join(args.data_dir, 'motion_mats', '{}_motion_resaved.mat'.format(i))
-    #mot_file = scipy.io.loadmat(mot_file_path)
-    #if using fmriprep files
     raw_reg = raw_df.loc[raw_df['subjs'] == i, 'regressors'].iloc[0]
     regressors = pd.read_csv(raw_reg, sep='\t', index_col=False)
     trans_x, trans_y, trans_z = regressors['trans_x'], regressors['trans_y'], regressors['trans_z']
@@ -310,16 +282,12 @@ for i in raw_df['subjs']:
 
     #finally, build samples...
     for vol in range(vols):
-        #SPM file version ...
-        #sample = (subjid, vol, raw_nii, age, sex, convolved[vol], neural[vol], mot_file['x'][vol].item(), \
-        #mot_file['y'][vol].item(), mot_file['z'][vol].item(), mot_file['pitch'][vol].item(), mot_file['roll'][vol].item(), \
-        #mot_file['yaw'][vol].item())
-        sample = (subjid, vol, raw_nii, age, sex, time_series[vol], neural[vol], trans_x[vol], \
+        sample = (subjid, vol, raw_nii, time_series[vol], neural[vol], trans_x[vol], \
         trans_y[vol], trans_z[vol], rot_x[vol], rot_y[vol], \
         rot_z[vol])
         samples.append(sample)
 
-new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "age", "sex", "task", \
+new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "task", \
 "task_bin", "x", "y", "z", "rot_x", "rot_y", "rot_z"])
 #z-score motion variables
 zscored_df = zscore(new_df)

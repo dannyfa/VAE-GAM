@@ -88,7 +88,7 @@ class VAE(nn.Module):
         assert device_name != "cuda" or torch.cuda.is_available()
         if device_name == "auto":
             device_name = "cuda" if torch.cuda.is_available() else "cpu"
-            self.device = torch.device("cuda:1")
+            self.device = torch.device("cuda:0")
         if self.save_dir != '' and not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 		# init epsilon param modeling single voxel variance
@@ -117,7 +117,7 @@ class VAE(nn.Module):
 
 		#Now init kappa + non-linear GP params for other (non-binary) regressors
 		#x trans
-        self.xu_x = torch.linspace(-4.00, 3.50, self.inducing_pts).to(self.device)
+        self.xu_x = torch.linspace(-1.62, 5.27, self.inducing_pts).to(self.device)
         self.gp_params['x']['xu'] = self.xu_x
         self.qu_m_x = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['x']['qu_m'] = self.qu_m_x
@@ -132,7 +132,7 @@ class VAE(nn.Module):
         self.va_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['x']['va'] = self.va_x
         #y trans
-        self.xu_y = torch.linspace(-2.5, 3.42, self.inducing_pts).to(self.device)
+        self.xu_y = torch.linspace(-2.98, 3.78, self.inducing_pts).to(self.device)
         self.gp_params['y']['xu'] = self.xu_y
         self.qu_m_y = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['y']['qu_m'] = self.qu_m_y
@@ -147,7 +147,7 @@ class VAE(nn.Module):
         self.va_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['y']['va'] = self.va_y
         #z trans
-        self.xu_z = torch.linspace(-3.45, 3.80, self.inducing_pts).to(self.device)
+        self.xu_z = torch.linspace(-3.715, 6.56, self.inducing_pts).to(self.device)
         self.gp_params['z']['xu'] = self.xu_z
         self.qu_m_z = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['z']['qu_m'] = self.qu_m_z
@@ -163,7 +163,7 @@ class VAE(nn.Module):
         self.gp_params['z']['va'] = self.va_z
         #rotational ones
         #xrot
-        self.xu_xrot = torch.linspace(-3.31, 2.73, self.inducing_pts).to(self.device)
+        self.xu_xrot = torch.linspace(-3.50, 4.61, self.inducing_pts).to(self.device)
         self.gp_params['xrot']['xu'] = self.xu_xrot
         self.qu_m_xrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['xrot']['qu_m'] = self.qu_m_xrot
@@ -179,7 +179,7 @@ class VAE(nn.Module):
         self.gp_params['xrot']['va'] = self.va_xrot
 
         #yrot
-        self.xu_yrot = torch.linspace(-3.14, 4.76, self.inducing_pts).to(self.device)
+        self.xu_yrot = torch.linspace(-2.68, 3.36, self.inducing_pts).to(self.device)
         self.gp_params['yrot']['xu'] = self.xu_yrot
         self.qu_m_yrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['yrot']['qu_m'] = self.qu_m_yrot
@@ -195,7 +195,7 @@ class VAE(nn.Module):
         self.gp_params['yrot']['va'] = self.va_yrot
 
         #zrot
-        self.xu_zrot = torch.linspace(-3.03, 2.54, self.inducing_pts).to(self.device)
+        self.xu_zrot = torch.linspace(-2.60, 3.58, self.inducing_pts).to(self.device)
         self.gp_params['zrot']['xu'] = self.xu_zrot
         self.qu_m_zrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['zrot']['qu_m'] = self.qu_m_zrot
