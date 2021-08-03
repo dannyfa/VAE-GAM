@@ -417,7 +417,7 @@ class VAE(nn.Module):
                 beta_mean += f_bar
                 beta_cov += Sigma
                 #now get Kl  for non-linear GP term
-                gp_kl = gp_regressor.compute_GP_kl(self.so_sqrd, self.inducing_pts)
+                gp_kl = gp_regressor.compute_GP_kl(self.so_sqrd, self.inducing_pts, i, xq, self.save_dir) #adding i and xq to debug here
                 gp_loss += gp_kl
             beta_dist = MultivariateNormal(beta_mean, (beta_cov + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
             task_var = beta_dist.rsample()

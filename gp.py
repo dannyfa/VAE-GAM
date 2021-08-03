@@ -36,10 +36,26 @@ class GP():
         self.qu_m = qu_m
         self.qu_S = qu_S
 
-    def compute_GP_kl(self, so_sqrd, num_inducing_pts):
+    def compute_GP_kl(self, so_sqrd, num_inducing_pts, i, xq, save_dir):
         """Computes kl for GP term """
         prior_dist = MultivariateNormal(torch.zeros(num_inducing_pts).to(self.device), \
         10*torch.eye(num_inducing_pts).to(self.device))
+        #adding this to catch param vals and etc when qu_S singular occurs
+        if torch.linalg.det(self.qu_S.detach()) == 0.0:
+            print('Oops, qu_S mat is singular!!')
+            vars_dict = {}
+            fname = os.path.join(save_dir, 'qu_S_singular_diagnostics.tar')
+            vars_dict['qu_m'] = self.qu_m.detach()
+            vars_dict['qu_S'] = self.qu_S.detach()
+            vars_dict['ls'] = self.ls.detach()
+            vars_dict['k_var'] = self.k_var.detach()
+            vars_dict['Xu'] = self.Xu
+            vars_dict['cov_id'] = i
+            vars_dict['batch_vals'] = xq
+            torch.save(vars_dict, fname)
+            #add small number to diag of qu_S
+            #does this work at all?
+            self.qu_S = self.qu_S + (1e-5*torch.eye(num_inducing_pts).to(self.device))
         post_dist = MultivariateNormal(self.qu_m, self.qu_S)
         gp_kl = kl.kl_divergence(post_dist, prior_dist)
         return gp_kl
