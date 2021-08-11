@@ -34,7 +34,7 @@ IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
     def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", \
-    num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0):
+    num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_file=''):
         super(VAE, self).__init__()
         self.nf = nf
         self.save_dir = save_dir
@@ -61,6 +61,8 @@ class VAE(nn.Module):
         self.gp_kl_scale = torch.as_tensor((gp_kl_scale)).to(self.device)
         # set max lengthscale for 1D GPs.
         self.max_ls = torch.as_tensor(3.0).to(self.device)
+        #get ranges for 1D GPs
+        xu_ranges = utils.get_xu_ranges(csv_file)
 		#init params for GPs
         self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
         #for task
@@ -72,7 +74,7 @@ class VAE(nn.Module):
         self.gp_params['task']['logstd'] = self.logstd_task
 		#Now init linear + non-linear (GP) params for remaining (non-binary) regressors.
 		#x trans
-        self.xu_x = torch.linspace(-4.09, 3.22, self.inducing_pts).to(self.device)
+        self.xu_x = torch.linspace(xu_ranges[0][0], xu_ranges[0][1], self.inducing_pts).to(self.device)
         self.gp_params['x']['xu'] = self.xu_x
         self.qu_m_x = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['x']['qu_m'] = self.qu_m_x
@@ -87,7 +89,7 @@ class VAE(nn.Module):
         self.logstd_x = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['x']['logstd'] = self.logstd_x
         #y trans
-        self.xu_y = torch.linspace(-2.67, 3.37, self.inducing_pts).to(self.device)
+        self.xu_y = torch.linspace(xu_ranges[1][0], xu_ranges[1][1], self.inducing_pts).to(self.device)
         self.gp_params['y']['xu'] = self.xu_y
         self.qu_m_y = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['y']['qu_m'] = self.qu_m_y
@@ -102,7 +104,7 @@ class VAE(nn.Module):
         self.logstd_y = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['y']['logstd'] = self.logstd_y
         #z trans
-        self.xu_z = torch.linspace(-3.095, 3.94, self.inducing_pts).to(self.device)
+        self.xu_z = torch.linspace(xu_ranges[2][0], xu_ranges[2][1], self.inducing_pts).to(self.device)
         self.gp_params['z']['xu'] = self.xu_z
         self.qu_m_z = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['z']['qu_m'] = self.qu_m_z
@@ -118,7 +120,7 @@ class VAE(nn.Module):
         self.gp_params['z']['logstd'] = self.logstd_z
         #rotational ones
         #xrot
-        self.xu_xrot = torch.linspace(-3.59, 2.82, self.inducing_pts).to(self.device)
+        self.xu_xrot = torch.linspace(xu_ranges[3][0], xu_ranges[3][1], self.inducing_pts).to(self.device)
         self.gp_params['xrot']['xu'] = self.xu_xrot
         self.qu_m_xrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['xrot']['qu_m'] = self.qu_m_xrot
@@ -133,7 +135,7 @@ class VAE(nn.Module):
         self.logstd_xrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['xrot']['logstd'] = self.logstd_xrot
         #yrot
-        self.xu_yrot = torch.linspace(-3.36, 4.63, self.inducing_pts).to(self.device)
+        self.xu_yrot = torch.linspace(xu_ranges[4][0], xu_ranges[4][1], self.inducing_pts).to(self.device)
         self.gp_params['yrot']['xu'] = self.xu_yrot
         self.qu_m_yrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['yrot']['qu_m'] = self.qu_m_yrot
@@ -148,7 +150,7 @@ class VAE(nn.Module):
         self.logstd_yrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['yrot']['logstd'] = self.logstd_yrot
         #zrot
-        self.xu_zrot = torch.linspace(-2.64, 3.18, self.inducing_pts).to(self.device)
+        self.xu_zrot = torch.linspace(xu_ranges[5][0], xu_ranges[5][1], self.inducing_pts).to(self.device)
         self.gp_params['zrot']['xu'] = self.xu_zrot
         self.qu_m_zrot = torch.nn.Parameter(torch.normal(0.0, 1.0, size=[1, self.inducing_pts]).to(self.device))
         self.gp_params['zrot']['qu_m'] = self.qu_m_zrot

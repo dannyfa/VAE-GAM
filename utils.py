@@ -30,7 +30,7 @@ def hrf(times):
     return values / np.max(values) * 0.6
 
 
-def get_xu_ranges(csv_file, eps = 1e-2):
+def get_xu_ranges(csv_file, eps = 1e-3):
     """
     Gets ranges for x values for GP inducing pts by rounding min/max values
     for each covariate across the entire dset.

@@ -65,7 +65,7 @@ if __name__ == "__main__":
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	model = vae_reg.VAE(num_inducing_pts = args.num_inducing_pts, gp_kl_scale = args.gp_kl_scale, \
-	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir)
+	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir, csv_file=args.csv_file)
 	if args.from_ckpt == True:
 		assert os.path.exists(args.ckpt_path), 'Oops, looks like ckpt file given does NOT exist!'
 		print('='*40)
