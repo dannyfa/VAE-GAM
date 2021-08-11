@@ -475,10 +475,56 @@ class VAE(nn.Module):
         self.gp_kl_scale = checkpoint['gp_kl_scale']
         self.inducing_pts = checkpoint['inducing_pts']
         #load in gp_params dict
-        #might need additional step to make each model attr. equal to value
-        #in loaded gp_params dict.
-        #Double check all vals are readed properly this way...
         self.gp_params = checkpoint['gp_params']
+        # and individual 1D gp params
+        #these are needed for gradient to pass through appropriately
+        #when training from existing checkpoint.
+        #task
+        self.sa_task = checkpoint['gp_params']['task']['sa']
+        self.logstd_task = checkpoint['gp_params']['task']['logstd']
+        # x_trans
+        self.sa_x = checkpoint['gp_params']['x']['sa']
+        self.logstd_x = checkpoint['gp_params']['x']['logstd']
+        self.qu_m_x = checkpoint['gp_params']['x']['qu_m']
+        self.qu_S_x = checkpoint['gp_params']['x']['qu_S']
+        self.logkvar_x = checkpoint['gp_params']['x']['logkvar']
+        self.logls_x = checkpoint['gp_params']['x']['log_ls']
+        #y_trans
+        self.sa_y = checkpoint['gp_params']['y']['sa']
+        self.logstd_y = checkpoint['gp_params']['y']['logstd']
+        self.qu_m_y = checkpoint['gp_params']['y']['qu_m']
+        self.qu_S_y = checkpoint['gp_params']['y']['qu_S']
+        self.logkvar_y = checkpoint['gp_params']['y']['logkvar']
+        self.logls_y = checkpoint['gp_params']['y']['log_ls']
+        #z_trans
+        self.sa_z = checkpoint['gp_params']['z']['sa']
+        self.logstd_z = checkpoint['gp_params']['z']['logstd']
+        self.qu_m_z = checkpoint['gp_params']['z']['qu_m']
+        self.qu_S_z = checkpoint['gp_params']['z']['qu_S']
+        self.logkvar_z = checkpoint['gp_params']['z']['logkvar']
+        self.logls_z = checkpoint['gp_params']['z']['log_ls']
+        #xrot
+        self.sa_xrot= checkpoint['gp_params']['xrot']['sa']
+        self.logstd_xrot = checkpoint['gp_params']['xrot']['logstd']
+        self.qu_m_xrot = checkpoint['gp_params']['xrot']['qu_m']
+        self.qu_S_xrot = checkpoint['gp_params']['xrot']['qu_S']
+        self.logkvar_xrot = checkpoint['gp_params']['xrot']['logkvar']
+        self.logls_xrot = checkpoint['gp_params']['xrot']['log_ls']
+        #yrot
+        self.sa_yrot = checkpoint['gp_params']['yrot']['sa']
+        self.logstd_yrot = checkpoint['gp_params']['yrot']['logstd']
+        self.qu_m_yrot = checkpoint['gp_params']['yrot']['qu_m']
+        self.qu_S_yrot = checkpoint['gp_params']['yrot']['qu_S']
+        self.logkvar_yrot = checkpoint['gp_params']['yrot']['logkvar']
+        self.logls_yrot = checkpoint['gp_params']['yrot']['log_ls']
+        #zrot
+        self.sa_zrot = checkpoint['gp_params']['zrot']['sa']
+        self.logstd_zrot = checkpoint['gp_params']['zrot']['logstd']
+        self.qu_m_zrot = checkpoint['gp_params']['zrot']['qu_m']
+        self.qu_S_zrot = checkpoint['gp_params']['zrot']['qu_S']
+        self.logkvar_zrot = checkpoint['gp_params']['zrot']['logkvar']
+        self.logls_zrot = checkpoint['gp_params']['zrot']['log_ls']
+
 
     def project_latent(self, loaders_dict, save_dir, title=None, split=98):
         #Mk sure data is unshuffled when plotting this out!
