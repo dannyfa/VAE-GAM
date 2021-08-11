@@ -1,12 +1,10 @@
 """
 
-Module implementing 1D GP for regressors
-
-This is largely based on Jack's code & on the notation for GP chapter in Kevin Murphy's textbook.
-It also follows closely ideas the original Rassmussen & William's text.
+Module implementing 1D sparse GP for covariates.
+This follows equations detailed in MLHC VAE-GAM paper (2021) and notation/ideas
+for sparse GP follow work of Hensman.
 
 """
-
 import numpy as np
 import torch
 from torch.distributions import MultivariateNormal, kl
@@ -24,9 +22,13 @@ class GP():
         Vertical variance for Gaussian kernel. Trainable.
         ls : float
         Lengthscale for Gaussian kernel. Trainable.
+        qu_m: torch.tensor
+        posterior mean for 1D GP. Trainable.
+        qu_S: torch.tensor
+        posterior covariance matrix for 1D GP. Trainable.
         """
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = torch.device("cuda")
+        self.device = torch.device(device_name)
         self.n = Xu.shape[0]
         assert len(Xu) > 1
         self.step = Xu[1] - Xu[0]
@@ -36,11 +38,15 @@ class GP():
         self.qu_m = qu_m
         self.qu_S = qu_S
 
-    def compute_GP_kl(self, so_sqrd, num_inducing_pts, i, xq, save_dir):
-        """Computes kl for GP term """
+    def compute_GP_kl(self, num_inducing_pts, i, xq, save_dir):
+        """
+        Computes KL divergence for (non-linear gain) GP term.
+        """
         prior_dist = MultivariateNormal(torch.zeros(num_inducing_pts).to(self.device), \
         10*torch.eye(num_inducing_pts).to(self.device))
-        #adding this to catch param vals and when qu_S has innapropriate vals
+        #adding try/except block to catch/save GP params when instability occurs
+        # i, xq and save_dir are ONLY used here. They will be taken out of this method
+        # once stability resolves
         try:
             post_dist = MultivariateNormal(self.qu_m, self.qu_S)
         except:
@@ -55,13 +61,13 @@ class GP():
             vars_dict['cov_id'] = i
             vars_dict['batch_vals'] = xq
             torch.save(vars_dict, fname)
-        gp_kl = kl.kl_divergence(post_dist, prior_dist) #this will fail if previous try fails
+        gp_kl = kl.kl_divergence(post_dist, prior_dist) #this will fail if previous try fails...
         return gp_kl
-    
+
     def evaluate_posterior(self, X_q):
         """
         Computes posterior over data points -- q(f).
-        As denoted in equation #9 of Appendix B.
+
         Parameters
         ----------
         X_q : torch.tensor
@@ -70,6 +76,7 @@ class GP():
         Mean for posterior over inducing points.
         qu_S: torch.Tensor
         Covariance matrix for posterior over inducing pts.
+
         Returns
         -----------
         f_bar : torch.tensor
@@ -77,6 +84,7 @@ class GP():
         Sigma: torch.tensor
         Covariance Matrix for posterior distribution over data points
         """
+
         #get Knu --> kernel distances between inducing pts and data points
         n_q = X_q.shape[0]
         knu = torch.zeros((self.n, n_q)).to(self.device)
@@ -113,6 +121,7 @@ def _striped_matrix(n):
 def _distance_to_kernel(dist_mat, k_var, ls, scale_factor=1.0):
     """
     Map distance to Gaussian kernel similarity, elementwise.
+
     Parameters
     ----------
     dist_mat : torch.Tensor

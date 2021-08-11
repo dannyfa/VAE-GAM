@@ -1,10 +1,10 @@
 """
-Module to create model-based regressor, base and full-reconstruction maps.
-Creates:
-1) single subject volumes
-2) subject level avgs
-3) across-subj avgs
-Should be called from inside wrapper script using a pre-trained model.
+Module to reconstruct and save covariate, base and full-reconstruction maps.
+Creates covariate, base and full-reconstruction maps for:
+1) single volumes
+2) subject-level avgs
+3) across-subj (grand) avgs
+Is called from inside wrapper script using a pre-trained model.
 """
 
 import os
@@ -14,14 +14,14 @@ import pandas as pd
 
 def mk_single_volumes(loader, model, csv_file, save_dir):
     """
-    Creates model's single volume reconstructions for base, regressors and full reconstruction.
+    Creates model's reconstructions for covariate, base and full-reconstruction maps.
     Args:
       dataset :: a torch dataset object (instantiated in wrapper script).
       model :: a VAE_GP model object (instantiated in wrapper script).
       csv_file :: csv with information on dataset.
       save_dir :: root directory where program outputs are written to.
     """
-    #get subj_ids and subj reference files from csv
+    #get subj_ids and subj reference nifti files from csv
     dset = pd.read_csv(csv_file)
     subjs = dset.subjid.unique().tolist()
     ref_niis = dset.nii_path.unique().tolist()
@@ -41,15 +41,15 @@ def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
     """
     Creates model-based subj-level average and grand average reconstruction maps for
     base, regressors and full reconstruction.
-    Maps for motion regressors are ommitted unless otherwise specified.
+    Maps for motion (nuisance) regressors are ommitted unless otherwise specified.
     Args:
       csv_file :: csv with information on dataset.
-      model :: a VAE_GP model object
+      model :: a VAE_GP model object.
       save_dir :: root directory where program outputs are written to.
       mk_motion_maps: bool. If 'True', subj and grand avg maps for all 6 motion
       regressors will be reconstructed as well.
     """
-    #set up dirs
+    #setup dirs
     ckpt_num = str(model.epoch).zfill(3)
     sngl_vols_dir = os.path.join(save_dir, 'reconstructions', \
     '{}_model_recons'.format(ckpt_num))
@@ -95,13 +95,13 @@ def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
         #calc grand avg maps
         gd_avg_maps[l] /= len(subjs)
         #save grand maps
-        #am using zeroth nifti file as Reference
+        #am using zeroth nifti file as ref
         #however, any file in list is ok since subjs are warped to common space
         _save_map(gd_avg_maps[l], ref_niis[0], avg_vols_dir, l)
 
 def _save_map(map, reference, save_dir, ext):
     """
-    Helper function for mk_avg_maps
+    Helper function for mk_avg_maps.
     Takes an array corresponding to a regressor map, a reference nifti file and
     a saving directory and outputs a saved nifti file corresponding to regressor map.
     Only needed b/c I am using nibabel and nifti format.
