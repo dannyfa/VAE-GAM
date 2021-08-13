@@ -30,7 +30,7 @@ def hrf(times):
     return values / np.max(values) * 0.6
 
 
-def get_xu_ranges(csv_file, eps = 1e-3):
+def get_xu_ranges(csv_files, eps = 1e-3):
     """
     Gets ranges for x values for GP inducing pts by rounding min/max values
     for each covariate across the entire dset.
@@ -39,12 +39,14 @@ def get_xu_ranges(csv_file, eps = 1e-3):
     csv_file: file containing data. This is the same file passed to Data Class
     and loaders.
     """
-    df = pd.read_csv(csv_file)
+    train_df = pd.read_csv(csv_files[0])
+    test_df = pd.read_csv(csv_files[1])
     mot_regrssors = ['x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']
     xu_ranges = []
     for reg in mot_regrssors:
-        min, max = df[reg].min(), df[reg].max()
-        xu_ranges.append([(min-eps), (max+eps)])
+        min_val = min(train_df[reg].min(), test_df[reg].min())
+        max_val = max(train_df[reg].max(), test_df[reg].max())
+        xu_ranges.append([(min_val-eps), (max_val+eps)])
     return xu_ranges
 
 

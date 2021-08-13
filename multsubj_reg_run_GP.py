@@ -18,8 +18,10 @@ from utils import str2bool
 
 parser = argparse.ArgumentParser(description='user args for vae_gam model')
 
-parser.add_argument('--csv_file', type=str, metavar='N', default='', \
+parser.add_argument('--train_csv', type=str, metavar='N', default='', \
 help='Full path to csv file with train dset to be used by DataClass and loaders. This is created by the pre_proc script.')
+parser.add_argument('--test_csv', type=str, metavar='N', default='', \
+help='Full path to csv file with test dset to be used by DataClass and loaders. This is created by the pre_proc script.')
 parser.add_argument('--save_dir', type=str, metavar='N', default='', \
 help='Dir where model params, latent projection maps, GP plots and reconstruction files are saved to. Default is to save files to current dir.')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', \
@@ -64,10 +66,10 @@ else:
 
 if __name__ == "__main__":
 	main_start = time.time()
-	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
-	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
+	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, train_csv = args.train_csv, test_csv = args.test_csv)
 	model = vae_reg.VAE(num_inducing_pts = args.num_inducing_pts, gp_kl_scale = args.gp_kl_scale, \
-	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir, csv_file=args.csv_file, neural_covariates=args.neural_covariates)
+	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir, \
+	csv_files = [args.train_csv, args.test_csv], neural_covariates=args.neural_covariates)
 	if args.from_ckpt == True:
 		assert os.path.exists(args.ckpt_path), 'Oops, looks like ckpt file given does NOT exist!'
 		print('='*40)
@@ -76,15 +78,17 @@ if __name__ == "__main__":
 	if args.recons_only == False:
 		model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq,\
 		save_freq = args.save_freq, save_dir=args.save_dir)
+		#again, am using train set when plotting 1D GPs, plotting LS UMAPPING and creating reconstructions...
+		#this can be changed if desired.
 		model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
-		model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
-		recon.mk_single_volumes(loaders_dict['test'], model, args.csv_file, args.save_dir) #will have to replace test loader for train one soon.
-		recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = True)
+		model.plot_GPs(csv_file=args.train_csv, save_dir=args.save_dir)
+		recon.mk_single_volumes(loaders_dict['UnShuffled_train'], model, args.train_csv, args.save_dir)
+		recon.mk_avg_maps(args.train_csv, model, args.save_dir, mk_motion_maps = True)
 	else:
 		assert args.from_ckpt==True, 'To choose recons_only option, --from_ckpt needs to be TRUE.'
 		model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
-		model.plot_GPs(csv_file=args.csv_file, save_dir=args.save_dir)
-		recon.mk_single_volumes(loaders_dict['test'], model, args.csv_file, args.save_dir) #will have to replace test loader for train one soon.
-		recon.mk_avg_maps(args.csv_file, model, args.save_dir, mk_motion_maps = True)
+		model.plot_GPs(csv_file=args.train_csv, save_dir=args.save_dir)
+		recon.mk_single_volumes(loaders_dict['UnShuffled_train'], model, args.train_csv, args.save_dir)
+		recon.mk_avg_maps(args.train_csv, model, args.save_dir, mk_motion_maps = True)
 	main_end = time.time()
 	print('Total model runtime (seconds): {}'.format(main_end - main_start))

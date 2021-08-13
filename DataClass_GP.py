@@ -68,15 +68,20 @@ class ToTensor(object):
                 'subjid': torch.tensor(subjid, dtype=torch.int64),
                 'vol_num': torch.tensor(vol_num, dtype=torch.float64)}
 
-def setup_data_loaders(batch_size=32, shuffle=(True, False), csv_file=''):
-    #Set num workers to zero for now.
-    #This should be changed when dealing with larger dsets.
-    #Setup the train loaders.
-    train_dataset = FMRIDataset(csv_file = csv_file, transform = ToTensor())
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, \
+def setup_data_loaders(batch_size=32, shuffle=(True, False, False), train_csv = '', test_csv = ''):
+    #set up train dset
+    train_dataset = FMRIDataset(csv_file = train_csv, transform = ToTensor())
+    #set up shuffle train dset loader --> this is used for training.
+    Shuffled_train_loader = DataLoader(train_dataset, batch_size=batch_size, \
                               shuffle=shuffle[0], num_workers=0)
-    #Setup the test loaders.
-    test_dataset = FMRIDataset(csv_file = csv_file, transform = ToTensor())
+    #set up unshuffled train loader
+    #this is used to plot LS -- when we need same dset as in TRAIN, but unshuffled.
+    UnShuffled_train_loader = DataLoader(train_dataset, batch_size=batch_size, \
+                              shuffle=shuffle[1], num_workers=0)
+    #Setup test dset
+    test_dataset = FMRIDataset(csv_file = test_csv, transform = ToTensor())
+    #set up unshuffled test loader
     test_loader = DataLoader(test_dataset, batch_size=batch_size, \
-                             shuffle=shuffle[1], num_workers=0)
-    return {'train':train_loader, 'test':test_loader}
+                             shuffle=shuffle[2], num_workers=0)
+    return {'Shuffled_train':Shuffled_train_loader, 'UnShuffled_train':UnShuffled_train_loader,\
+     'test':test_loader}

@@ -34,7 +34,7 @@ IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
     def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", \
-    num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_file='', neural_covariates=True):
+    num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_files='', neural_covariates=True):
         super(VAE, self).__init__()
         self.nf = nf
         self.save_dir = save_dir
@@ -63,7 +63,7 @@ class VAE(nn.Module):
         # set max lengthscale for 1D GPs.
         self.max_ls = torch.as_tensor(3.0).to(self.device)
         #get ranges for 1D GPs
-        xu_ranges = utils.get_xu_ranges(csv_file)
+        xu_ranges = utils.get_xu_ranges(csv_files)
 		#init params for GPs
         self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
         #for task
@@ -535,10 +535,10 @@ class VAE(nn.Module):
         # Collect latent means.
         filename = str(self.epoch).zfill(3) + '_temp.pdf'
         file_path = os.path.join(save_dir, filename)
-        latent = np.zeros((len(loaders_dict['test'].dataset), self.num_latents))
+        latent = np.zeros((len(loaders_dict['UnShuffled_train'].dataset), self.num_latents))
         with torch.no_grad():
             j = 0
-            for i, sample in enumerate(loaders_dict['test']):
+            for i, sample in enumerate(loaders_dict['UnShuffled_train']):
                 x = sample['volume']
                 x = x.to(self.device)
                 mu, _, _ = self.encode(x)
@@ -552,7 +552,7 @@ class VAE(nn.Module):
         c_list = ['b','g','r','c','m','y','k','orange','blueviolet','hotpink',\
         'lime','skyblue','teal','sienna']
         colors = itertools.cycle(c_list)
-        data_chunks = range(0,len(loaders_dict['test'].dataset),split)
+        data_chunks = range(0,len(loaders_dict['UnShuffled_train'].dataset),split)
         for i in data_chunks:
             #commented code below can be used if desiring to plot LS by time pt OR by task/no-task
             #t = np.arange(split)
@@ -879,13 +879,13 @@ class VAE(nn.Module):
     def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
         print("="*40)
         print("Training: epochs", self.epoch, "to", self.epoch+epochs-1)
-        print("Training set:", len(loaders['train'].dataset))
+        print("Training set:", len(loaders['Shuffled_train'].dataset))
         print("Test set:", len(loaders['test'].dataset))
         print("="*40)
         # For some number of epochs...
         for epoch in range(self.epoch, self.epoch+epochs):
             #Run through the training data and record a loss.
-            loss = self.train_epoch(loaders['train'])
+            loss = self.train_epoch(loaders['Shuffled_train'])
             self.loss['train'][epoch] = loss
             self.writer.add_scalar("Loss/Train", loss, self.epoch)
             self.log_qu_plots('train')
