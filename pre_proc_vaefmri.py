@@ -28,6 +28,10 @@ parser.add_argument('--save_dir', type=str, metavar='N', default='', \
 help='Dir where output from preprocessing script should be saved to.')
 parser.add_argument('--control', type=str2bool, nargs='?', const=True, default=False, \
 help='Boolean flag indicating if csv file created is for running simulations using synthetic (control) data.')
+parser.add_argument('--control_int', type=str, metavar='N', default='', \
+help='Str representing intensity of control stimulus in data csv file points to. Used in name of output file when control==True.')
+parser.add_argument('--set_tag', type=str, metavar='N', default='TRAIN', \
+help='Str indicating which data set (TRAIN, TEST or VAL) this csv file refers to. Used in name of output file.')
 parser.add_argument('--nii_file_pattern', type=str, metavar='N', default='sub-A000*_preproc_bold_brainmasked_resampled.nii.gz', \
 help='General pattern for filenames of nifti files to be used. Can contain any wildcard that glob and rgob can handle.')
 parser.add_argument('--mot_file_pattern', type=str, metavar='N', \
@@ -53,9 +57,10 @@ else:
     else:
         pass
 
-csv_name_suffix = '_chkr_simple_ts.csv'
+csv_name_suffix = '_{}_chkr_simple_ts.csv'.format(args.set_tag)
 if args.control == True:
-    csv_name_suffix = '_large3_control_simple_ts.csv'
+    assert args.control_int != '', 'You need to provide an intensity value if creating a csv for control/synthetic data!'
+    csv_name_suffix = '_{}_large3_{}_control_simple_ts.csv'.format(args.set_tag, args.control_int)
 
 #get subjIDs
 #excluded sub-A00058952 d/t excess movement.

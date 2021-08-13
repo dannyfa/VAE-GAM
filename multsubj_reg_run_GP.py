@@ -48,6 +48,8 @@ parser.add_argument('--ckpt_path', type=str, metavar='N', default='', \
 help='Path to ckpt with saved model state to be loaded. Only effective if --from_ckpt == True.')
 parser.add_argument('--recons_only', type=str2bool, nargs='?', const=True, default=False, \
 help='Boolean flag indicating if trainig is to be skipped.')
+parser.add_argument('--neural_covariates', type=str2bool, nargs='?', const=True, default=True, \
+help='Boolean flag indicating if covariate set includes neural/biological effects which should be convolved with the HRF.')
 
 args = parser.parse_args()
 torch.manual_seed(args.seed)
@@ -65,7 +67,7 @@ if __name__ == "__main__":
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, csv_file = args.csv_file)
 	fMRI_data = data.FMRIDataset(csv_file = args.csv_file, transform = data.ToTensor())
 	model = vae_reg.VAE(num_inducing_pts = args.num_inducing_pts, gp_kl_scale = args.gp_kl_scale, \
-	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir, csv_file=args.csv_file)
+	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir, csv_file=args.csv_file, neural_covariates=args.neural_covariates)
 	if args.from_ckpt == True:
 		assert os.path.exists(args.ckpt_path), 'Oops, looks like ckpt file given does NOT exist!'
 		print('='*40)

@@ -34,13 +34,14 @@ IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
     def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", \
-    num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_file=''):
+    num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_file='', neural_covariates=True):
         super(VAE, self).__init__()
         self.nf = nf
         self.save_dir = save_dir
         self.lr = lr
         self.num_covariates = num_covariates
         self.num_latents = num_latents
+        self.neural_covariates = neural_covariates
         self.z_dim = self.num_latents + self.num_covariates + 1
         assert device_name != "cuda" or torch.cuda.is_available()
         if device_name == "auto":
@@ -363,8 +364,11 @@ class VAE(nn.Module):
             if train_mode:
                 #add beta plot to TB
                 self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1], log_type)
-            #apply HRF conv to biological regressor ONLY
-            if i ==1:
+            #apply HRF if biological/neural regressors are present.
+            #this set up assumes motion covariates come last and all covariates before that are either
+            # 1) biological when neural_covariates==True OR
+            # 2) synthetic when neural_covariates==False
+            if self.neural_covariates==True and i<(self.num_covariates-5):
                 task_var = self.do_hrf_conv(task_var)
             #use result to scale effect map.
             cons = torch.einsum('b,bx->bx', task_var, diff)
