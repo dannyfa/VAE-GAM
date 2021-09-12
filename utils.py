@@ -12,6 +12,11 @@ from scipy.stats import gamma
 import pandas as pd
 from copy import deepcopy
 import re
+import matplotlib.pyplot as plt
+plt.switch_backend('agg')
+from torch.utils.tensorboard import SummaryWriter
+from scipy import ndimage
+from scipy.stats import norm
 
 
 def hrf(times):
@@ -171,3 +176,206 @@ def scale_beta_maps(beta_maps):
         map_max = np.amax(beta_maps[i, :].flatten())
         beta_maps[i, :] = beta_maps[i, :]/map_max
     return beta_maps
+
+#methods to log maps, GP params and etc during training
+
+def log_qu_plots(epoch, gp_params, writer, log_type):
+    """
+    Creates q(u) plots which can be passed as figs to TB.
+    Should be called after each epoch uptade.
+    """
+    #get means (qu_m), covariance mat (qu_S) and xu ranges for each covariate
+    #x
+    qu_m_x = gp_params['x']['qu_m'].detach().cpu().numpy().reshape(6)
+    qu_S_x = np.diag(gp_params['x']['qu_S'].detach().cpu().numpy())
+    xu_x = gp_params['x']['xu'].detach().cpu().numpy()
+    #y
+    qu_m_y = gp_params['y']['qu_m'].detach().cpu().numpy().reshape(6)
+    qu_S_y = np.diag(gp_params['y']['qu_S'].detach().cpu().numpy())
+    xu_y = gp_params['y']['xu'].detach().cpu().numpy()
+    #z
+    qu_m_z = gp_params['z']['qu_m'].detach().cpu().numpy().reshape(6)
+    qu_S_z = np.diag(gp_params['z']['qu_S'].detach().cpu().numpy())
+    xu_z = gp_params['z']['xu'].detach().cpu().numpy()
+    #xrot
+    qu_m_xrot = gp_params['xrot']['qu_m'].detach().cpu().numpy().reshape(6)
+    qu_S_xrot = np.diag(gp_params['xrot']['qu_S'].detach().cpu().numpy())
+    xu_xrot = gp_params['xrot']['xu'].detach().cpu().numpy()
+    #yrot
+    qu_m_yrot = gp_params['yrot']['qu_m'].detach().cpu().numpy().reshape(6)
+    qu_S_yrot = np.diag(gp_params['yrot']['qu_S'].detach().cpu().numpy())
+    xu_yrot = gp_params['yrot']['xu'].detach().cpu().numpy()
+    #zrot
+    qu_m_zrot = gp_params['zrot']['qu_m'].detach().cpu().numpy().reshape(6)
+    qu_S_zrot = np.diag(gp_params['zrot']['qu_S'].detach().cpu().numpy())
+    xu_zrot = gp_params['zrot']['xu'].detach().cpu().numpy()
+
+    #now create figure
+    fig, axs = plt.subplots(3,2, figsize=(15, 15))
+    axs[0,0].plot(xu_x, qu_m_x, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    x_two_sigma = 2*np.sqrt(qu_S_x)
+    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    axs[0,0].fill_between(xu_x, (qu_m_x-x_two_sigma), (qu_m_x+x_two_sigma), **kwargs)
+    axs[0,0].legend(loc='best')
+    axs[0,0].set_title('q(u) x covariate at epoch {}'.format(epoch))
+    axs[0,0].set_xlabel('Covariate x -- x vals ')
+    axs[0,0].set_ylabel('q(u)')
+
+    axs[0,1].plot(xu_y, qu_m_y, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    y_two_sigma = 2*np.sqrt(qu_S_y)
+    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    axs[0,1].fill_between(xu_y, (qu_m_y-y_two_sigma), (qu_m_y+y_two_sigma), **kwargs)
+    axs[0,1].legend(loc='best')
+    axs[0,1].set_title('q(u) y covariate at epoch {}'.format(epoch))
+    axs[0,1].set_xlabel('Covariate y -- x vals ')
+    axs[0,1].set_ylabel('q(u)')
+
+    axs[1,0].plot(xu_z, qu_m_z, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    z_two_sigma = 2*np.sqrt(qu_S_z)
+    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    axs[1,0].fill_between(xu_z, (qu_m_z-z_two_sigma), (qu_m_z+z_two_sigma), **kwargs)
+    axs[1,0].legend(loc='best')
+    axs[1,0].set_title('q(u) z covariate at epoch {}'.format(epoch))
+    axs[1,0].set_xlabel('Covariate z -- x vals ')
+    axs[1,0].set_ylabel('q(u)')
+
+    axs[1,1].plot(xu_xrot, qu_m_xrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    xrot_two_sigma = 2*np.sqrt(qu_S_xrot)
+    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    axs[1,1].fill_between(xu_xrot, (qu_m_xrot-xrot_two_sigma), (qu_m_xrot+xrot_two_sigma), **kwargs)
+    axs[1,1].legend(loc='best')
+    axs[1,1].set_title('q(u) xrot covariate at epoch {}'.format(epoch))
+    axs[1,1].set_xlabel('Covariate xrot -- x vals ')
+    axs[1,1].set_ylabel('q(u)')
+
+    axs[2,0].plot(xu_yrot, qu_m_yrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    yrot_two_sigma = 2*np.sqrt(qu_S_yrot)
+    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    axs[2,0].fill_between(xu_yrot, (qu_m_yrot-yrot_two_sigma), (qu_m_yrot+yrot_two_sigma), **kwargs)
+    axs[2,0].legend(loc='best')
+    axs[2,0].set_title('q(u) yrot covariate at epoch {}'.format(epoch))
+    axs[2,0].set_xlabel('Covariate yrot -- x vals ')
+    axs[2,0].set_ylabel('q(u)')
+
+    axs[2,1].plot(xu_zrot, qu_m_zrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    zrot_two_sigma = 2*np.sqrt(qu_S_zrot)
+    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    axs[2,1].fill_between(xu_zrot, (qu_m_zrot-zrot_two_sigma), (qu_m_zrot+zrot_two_sigma), **kwargs)
+    axs[2,1].legend(loc='best')
+    axs[2,1].set_title('q(u) zrot covariate at epoch {}'.format(epoch))
+    axs[2,1].set_xlabel('Covariate zrot -- x vals ')
+    axs[2,1].set_ylabel('q(u)')
+
+    #and pass it to TB writer
+    writer.add_figure("q(u)_{}".format(log_type), fig)
+
+def log_qkappa_plots(gp_params, writer, log_type):
+    """
+    Logs q(k) to tensorboard.
+    Plots only posterior --> prior is N(1, 0.5^2).
+    """
+    #task
+    sa_task = gp_params['task']['sa'].detach().cpu().numpy().reshape(1)
+    std_task = np.exp(gp_params['task']['logstd'].detach().cpu().numpy())
+    task_gauss = norm(sa_task[0], scale = std_task[0])
+    x_task = np.linspace(task_gauss.ppf(0.01), task_gauss.ppf(0.99), 100)
+    y_task = task_gauss.pdf(x_task)
+    #x
+    sa_x= gp_params['x']['sa'].detach().cpu().numpy().reshape(1)
+    std_x = np.exp(gp_params['x']['logstd'].detach().cpu().numpy())
+    x_gauss = norm(sa_x[0], scale = std_x[0])
+    x_x = np.linspace(x_gauss.ppf(0.01), x_gauss.ppf(0.99), 100)
+    y_x = x_gauss.pdf(x_x)
+    #y
+    sa_y= gp_params['y']['sa'].detach().cpu().numpy().reshape(1)
+    std_y = np.exp(gp_params['y']['logstd'].detach().cpu().numpy())
+    y_gauss = norm(sa_y[0], scale = std_y[0])
+    x_y = np.linspace(y_gauss.ppf(0.01), y_gauss.ppf(0.99), 100)
+    y_y = y_gauss.pdf(x_y)
+    #z
+    sa_z= gp_params['z']['sa'].detach().cpu().numpy().reshape(1)
+    std_z = np.exp(gp_params['z']['logstd'].detach().cpu().numpy())
+    z_gauss = norm(sa_z[0], scale = std_z[0])
+    x_z = np.linspace(z_gauss.ppf(0.01), z_gauss.ppf(0.99), 100)
+    y_z = z_gauss.pdf(x_z)
+    #xrot
+    sa_xrot= gp_params['xrot']['sa'].detach().cpu().numpy().reshape(1)
+    std_xrot = np.exp(gp_params['xrot']['logstd'].detach().cpu().numpy())
+    xrot_gauss = norm(sa_xrot[0], scale = std_xrot[0])
+    x_xrot = np.linspace(xrot_gauss.ppf(0.01), xrot_gauss.ppf(0.99), 100)
+    y_xrot = xrot_gauss.pdf(x_xrot)
+    #yrot
+    sa_yrot= gp_params['yrot']['sa'].detach().cpu().numpy().reshape(1)
+    std_yrot = np.exp(gp_params['yrot']['logstd'].detach().cpu().numpy())
+    yrot_gauss = norm(sa_yrot[0], scale = std_yrot[0])
+    x_yrot = np.linspace(yrot_gauss.ppf(0.01), yrot_gauss.ppf(0.99), 100)
+    y_yrot = yrot_gauss.pdf(x_yrot)
+    #zrot
+    sa_zrot= gp_params['zrot']['sa'].detach().cpu().numpy().reshape(1)
+    std_zrot = np.exp(gp_params['zrot']['logstd'].detach().cpu().numpy())
+    zrot_gauss = norm(sa_zrot[0], scale = std_zrot[0])
+    x_zrot = np.linspace(zrot_gauss.ppf(0.01), zrot_gauss.ppf(0.99), 100)
+    y_zrot = zrot_gauss.pdf(x_zrot)
+
+    #now create plot
+    fig, axs = plt.subplots(3,3, figsize=(15, 15))
+    axs[0,0].plot(x_task, y_task, lw=2, alpha = 0.5, color = 'green')
+    axs[0,0].set_title('Task q(k)')
+    axs[0,1].plot(x_x, y_x, lw=2, alpha = 0.5, color = 'blue')
+    axs[0,1].set_title('X q(k)')
+    axs[0,2].plot(x_y, y_y, lw=2, alpha = 0.5, color = 'orange')
+    axs[0,2].set_title('Y q(k)')
+    axs[1,0].plot(x_z, y_z, lw=2, alpha = 0.5, color = 'red')
+    axs[1,0].set_title('Z q(k)')
+    axs[1,1].plot(x_xrot, y_xrot, lw=2, alpha = 0.5, color = 'violet')
+    axs[1,1].set_title('Xrot q(k)')
+    axs[1,2].plot(x_yrot, y_yrot, lw=2, alpha = 0.5, color = 'magenta')
+    axs[1,2].set_title('Yrot q(k)')
+    axs[2,0].plot(x_zrot, y_zrot, lw=2, alpha = 0.5, color = 'purple')
+    axs[2,0].set_title('Zrot q(k)')
+    #pass it to TB writer
+    writer.add_figure("q(k)_{}".format(log_type), fig)
+
+def log_beta(writer, xq, beta_mean, beta_cov, covariate_name, log_type):
+    """
+    Logs beta dist plots to TB.
+    This is done from within fwd method.
+    """
+    cov_dict = {}
+    xq = xq.cpu().numpy()
+    beta_mean = beta_mean.detach().cpu().numpy()
+    two_sigma = 2*np.sqrt(np.diag(beta_cov.detach().cpu().numpy()))
+    cov_dict['xq'] = xq
+    cov_dict['mean'] = beta_mean
+    cov_dict['two_sig'] = two_sigma
+    cov_data = pd.DataFrame.from_dict(cov_dict)
+    sorted_cov_data = cov_data.sort_values(by=["xq"])
+    fig = plt.figure()
+    plt.plot(sorted_cov_data['xq'], sorted_cov_data['mean'], \
+    c='darkblue', alpha=0.5, label='Beta posterior mean')
+    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    plt.fill_between(sorted_cov_data['xq'], (sorted_cov_data['mean'] - sorted_cov_data['two_sig']), \
+    (sorted_cov_data['mean'] + sorted_cov_data['two_sig']), **kwargs)
+    plt.legend(loc='best')
+    plt.title('Beta_{}'.format(covariate_name))
+    plt.xlabel('Covariate')
+    plt.ylabel('Beta Ouput')
+    writer.add_figure("Beta/{}_{}".format(covariate_name, log_type), fig)
+
+def log_map(writer, img_shape, map, slice, map_name, batch_size, log_type):
+    """
+    Logs a particular brain map reconstruction to TB.
+    Args
+    ----
+    Map: (np array) map reconstructions for a given minibatch.
+    slice: (int) specific slice we wish to log.
+    map_name: (string) Name of map (e.g., base, task)
+    batch_size: (int) Size of minibatch.
+    For now am logging slices only in saggital view.
+    """
+    map = map.reshape((batch_size, img_shape[0], img_shape[1], img_shape[2]))
+    for i in range(batch_size):
+        slc = map[i, slice, :, :]
+        slc = ndimage.rotate(slc, 90)
+        fig_name = '{}_{}_{}/{}'.format(map_name, log_type, slice, i)
+        writer.add_image(fig_name, slc, dataformats='HW')

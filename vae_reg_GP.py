@@ -327,9 +327,9 @@ class VAE(nn.Module):
         #log base map to TB
         if train_mode:
             #log slices 12, 15 and 18 for all batch elements
-            self.log_map(imgs['base'], 12, 'base_map', ids.shape[0], log_type)
-            self.log_map(imgs['base'], 15, 'base_map', ids.shape[0], log_type)
-            self.log_map(imgs['base'], 18, 'base_map', ids.shape[0], log_type)
+            utils.log_map(self.writer, IMG_SHAPE, imgs['base'], 12, 'base_map', ids.shape[0], log_type)
+            utils.log_map(self.writer, IMG_SHAPE, imgs['base'], 15, 'base_map', ids.shape[0], log_type)
+            utils.log_map(self.writer, IMG_SHAPE, imgs['base'], 18, 'base_map', ids.shape[0], log_type)
         for i in range(1, (self.num_covariates+1)):
             cov_oh = torch.nn.functional.one_hot(i*torch.ones(ids.shape[0],\
             dtype=torch.int64), self.num_covariates+1)
@@ -363,7 +363,7 @@ class VAE(nn.Module):
             task_var = beta_dist.rsample()
             if train_mode:
                 #add beta plot to TB
-                self.log_beta(xq, beta_mean, beta_cov, gp_params_keys[i-1], log_type)
+                utils.log_beta(self.writer, xq, beta_mean, beta_cov, gp_params_keys[i-1], log_type)
             #apply HRF if biological/neural regressors are present.
             #this set up assumes motion covariates come last and all covariates before that are either
             # 1) biological when neural_covariates==True OR
@@ -375,9 +375,9 @@ class VAE(nn.Module):
             if i==1 and train_mode==True:
                 #log only task (vis. stim map) to TB.
                 #again, am doing so for slices 12, 15 and 18.
-                self.log_map(cons.detach().cpu().numpy(), 12, 'task_map', ids.shape[0], log_type)
-                self.log_map(cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0], log_type)
-                self.log_map(cons.detach().cpu().numpy(), 18, 'task_map', ids.shape[0], log_type)
+                utils.log_map(self.writer, IMG_SHAPE, cons.detach().cpu().numpy(), 12, 'task_map', ids.shape[0], log_type)
+                utils.log_map(self.writer, IMG_SHAPE, cons.detach().cpu().numpy(), 15, 'task_map', ids.shape[0], log_type)
+                utils.log_map(self.writer, IMG_SHAPE, cons.detach().cpu().numpy(), 18, 'task_map', ids.shape[0], log_type)
             #encourage all maps to be close to their GLM approximations.
             glm_diff = torch.sum(torch.cdist(cons, self.glm_maps[:, i].unsqueeze(0).expand(ids.shape[0], -1).float(), p=2))
             glm_reg += glm_diff
@@ -387,9 +387,9 @@ class VAE(nn.Module):
         #log full reconstruction to TB as well.
         #again, doing so for slices 12, 15 and 18.
         if train_mode:
-            self.log_map(imgs['full_rec'], 12, 'full_reconstruction', ids.shape[0], log_type)
-            self.log_map(imgs['full_rec'], 15, 'full_reconstruction', ids.shape[0], log_type)
-            self.log_map(imgs['full_rec'], 18, 'full_reconstruction', ids.shape[0], log_type)
+            utils.log_map(self.writer, IMG_SHAPE, imgs['full_rec'], 12, 'full_reconstruction', ids.shape[0], log_type)
+            utils.log_map(self.writer, IMG_SHAPE, imgs['full_rec'], 15, 'full_reconstruction', ids.shape[0], log_type)
+            utils.log_map(self.writer, IMG_SHAPE, imgs['full_rec'], 18, 'full_reconstruction', ids.shape[0], log_type)
         # calculate loss for VAE
         elbo = -kl.kl_divergence(latent_dist, self.z_prior)
         obs_dist = Normal(x_rec.float(),\
@@ -679,202 +679,202 @@ class VAE(nn.Module):
             file_path = os.path.join(plot_dir, filename)
             plt.savefig(file_path)
 
-    def log_qu_plots(self, log_type):
-        """
-        Creates q(u) plots which can be passed as figs to TB.
-        Should be called after each epoch uptade.
-        """
+    #def log_qu_plots(self, log_type):
+    #    """
+    #    Creates q(u) plots which can be passed as figs to TB.
+    #    Should be called after each epoch uptade.
+    #    """
         #get means (qu_m) and covariance mat (qu_S) for each covariate
         #x
-        qu_m_x = self.gp_params['x']['qu_m'].detach().cpu().numpy().reshape(6)
-        qu_S_x = np.diag(self.gp_params['x']['qu_S'].detach().cpu().numpy())
+    #    qu_m_x = self.gp_params['x']['qu_m'].detach().cpu().numpy().reshape(6)
+    #    qu_S_x = np.diag(self.gp_params['x']['qu_S'].detach().cpu().numpy())
         #y
-        qu_m_y = self.gp_params['y']['qu_m'].detach().cpu().numpy().reshape(6)
-        qu_S_y = np.diag(self.gp_params['y']['qu_S'].detach().cpu().numpy())
+    #    qu_m_y = self.gp_params['y']['qu_m'].detach().cpu().numpy().reshape(6)
+    #    qu_S_y = np.diag(self.gp_params['y']['qu_S'].detach().cpu().numpy())
         #z
-        qu_m_z = self.gp_params['z']['qu_m'].detach().cpu().numpy().reshape(6)
-        qu_S_z = np.diag(self.gp_params['z']['qu_S'].detach().cpu().numpy())
+    #    qu_m_z = self.gp_params['z']['qu_m'].detach().cpu().numpy().reshape(6)
+    #    qu_S_z = np.diag(self.gp_params['z']['qu_S'].detach().cpu().numpy())
         #xrot
-        qu_m_xrot = self.gp_params['xrot']['qu_m'].detach().cpu().numpy().reshape(6)
-        qu_S_xrot = np.diag(self.gp_params['xrot']['qu_S'].detach().cpu().numpy())
+    #    qu_m_xrot = self.gp_params['xrot']['qu_m'].detach().cpu().numpy().reshape(6)
+    #    qu_S_xrot = np.diag(self.gp_params['xrot']['qu_S'].detach().cpu().numpy())
         #yrot
-        qu_m_yrot = self.gp_params['yrot']['qu_m'].detach().cpu().numpy().reshape(6)
-        qu_S_yrot = np.diag(self.gp_params['yrot']['qu_S'].detach().cpu().numpy())
+    #    qu_m_yrot = self.gp_params['yrot']['qu_m'].detach().cpu().numpy().reshape(6)
+    #    qu_S_yrot = np.diag(self.gp_params['yrot']['qu_S'].detach().cpu().numpy())
         #zrot
-        qu_m_zrot = self.gp_params['zrot']['qu_m'].detach().cpu().numpy().reshape(6)
-        qu_S_zrot = np.diag(self.gp_params['zrot']['qu_S'].detach().cpu().numpy())
+    #   qu_m_zrot = self.gp_params['zrot']['qu_m'].detach().cpu().numpy().reshape(6)
+    #    qu_S_zrot = np.diag(self.gp_params['zrot']['qu_S'].detach().cpu().numpy())
 
         #now create figure
-        fig, axs = plt.subplots(3,2, figsize=(15, 15))
+    #    fig, axs = plt.subplots(3,2, figsize=(15, 15))
 
-        axs[0,0].plot(self.xu_x.cpu().numpy(), qu_m_x, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
-        x_two_sigma = 2*np.sqrt(qu_S_x)
-        kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
-        axs[0,0].fill_between(self.xu_x.cpu().numpy(), (qu_m_x-x_two_sigma), (qu_m_x+x_two_sigma), **kwargs)
-        axs[0,0].legend(loc='best')
-        axs[0,0].set_title('q(u) x covariate at epoch {}'.format(self.epoch))
-        axs[0,0].set_xlabel('Covariate x -- x vals ')
-        axs[0,0].set_ylabel('q(u)')
+    #    axs[0,0].plot(self.xu_x.cpu().numpy(), qu_m_x, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    #    x_two_sigma = 2*np.sqrt(qu_S_x)
+    #    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    #    axs[0,0].fill_between(self.xu_x.cpu().numpy(), (qu_m_x-x_two_sigma), (qu_m_x+x_two_sigma), **kwargs)
+    #    axs[0,0].legend(loc='best')
+    #    axs[0,0].set_title('q(u) x covariate at epoch {}'.format(self.epoch))
+    #    axs[0,0].set_xlabel('Covariate x -- x vals ')
+    #    axs[0,0].set_ylabel('q(u)')
 
-        axs[0,1].plot(self.xu_y.cpu().numpy(), qu_m_y, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
-        y_two_sigma = 2*np.sqrt(qu_S_y)
-        kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
-        axs[0,1].fill_between(self.xu_y.cpu().numpy(), (qu_m_y-y_two_sigma), (qu_m_y+y_two_sigma), **kwargs)
-        axs[0,1].legend(loc='best')
-        axs[0,1].set_title('q(u) y covariate at epoch {}'.format(self.epoch))
-        axs[0,1].set_xlabel('Covariate y -- x vals ')
-        axs[0,1].set_ylabel('q(u)')
+    #    axs[0,1].plot(self.xu_y.cpu().numpy(), qu_m_y, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    #    y_two_sigma = 2*np.sqrt(qu_S_y)
+    #    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    #    axs[0,1].fill_between(self.xu_y.cpu().numpy(), (qu_m_y-y_two_sigma), (qu_m_y+y_two_sigma), **kwargs)
+    #    axs[0,1].legend(loc='best')
+    #    axs[0,1].set_title('q(u) y covariate at epoch {}'.format(self.epoch))
+    #    axs[0,1].set_xlabel('Covariate y -- x vals ')
+    #    axs[0,1].set_ylabel('q(u)')
 
-        axs[1,0].plot(self.xu_z.cpu().numpy(), qu_m_z, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
-        z_two_sigma = 2*np.sqrt(qu_S_z)
-        kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
-        axs[1,0].fill_between(self.xu_z.cpu().numpy(), (qu_m_z-z_two_sigma), (qu_m_z+z_two_sigma), **kwargs)
-        axs[1,0].legend(loc='best')
-        axs[1,0].set_title('q(u) z covariate at epoch {}'.format(self.epoch))
-        axs[1,0].set_xlabel('Covariate z -- x vals ')
-        axs[1,0].set_ylabel('q(u)')
+    #    axs[1,0].plot(self.xu_z.cpu().numpy(), qu_m_z, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    #    z_two_sigma = 2*np.sqrt(qu_S_z)
+    #    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    #    axs[1,0].fill_between(self.xu_z.cpu().numpy(), (qu_m_z-z_two_sigma), (qu_m_z+z_two_sigma), **kwargs)
+    #    axs[1,0].legend(loc='best')
+    #    axs[1,0].set_title('q(u) z covariate at epoch {}'.format(self.epoch))
+    #    axs[1,0].set_xlabel('Covariate z -- x vals ')
+    #    axs[1,0].set_ylabel('q(u)')
 
-        axs[1,1].plot(self.xu_xrot.cpu().numpy(), qu_m_xrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
-        xrot_two_sigma = 2*np.sqrt(qu_S_xrot)
-        kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
-        axs[1,1].fill_between(self.xu_xrot.cpu().numpy(), (qu_m_xrot-xrot_two_sigma), (qu_m_xrot+xrot_two_sigma), **kwargs)
-        axs[1,1].legend(loc='best')
-        axs[1,1].set_title('q(u) xrot covariate at epoch {}'.format(self.epoch))
-        axs[1,1].set_xlabel('Covariate xrot -- x vals ')
-        axs[1,1].set_ylabel('q(u)')
+    #    axs[1,1].plot(self.xu_xrot.cpu().numpy(), qu_m_xrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    #    xrot_two_sigma = 2*np.sqrt(qu_S_xrot)
+    #    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    #    axs[1,1].fill_between(self.xu_xrot.cpu().numpy(), (qu_m_xrot-xrot_two_sigma), (qu_m_xrot+xrot_two_sigma), **kwargs)
+    #    axs[1,1].legend(loc='best')
+    #    axs[1,1].set_title('q(u) xrot covariate at epoch {}'.format(self.epoch))
+    #    axs[1,1].set_xlabel('Covariate xrot -- x vals ')
+    #    axs[1,1].set_ylabel('q(u)')
 
-        axs[2,0].plot(self.xu_yrot.cpu().numpy(), qu_m_yrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
-        yrot_two_sigma = 2*np.sqrt(qu_S_yrot)
-        kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
-        axs[2,0].fill_between(self.xu_yrot.cpu().numpy(), (qu_m_yrot-yrot_two_sigma), (qu_m_yrot+yrot_two_sigma), **kwargs)
-        axs[2,0].legend(loc='best')
-        axs[2,0].set_title('q(u) yrot covariate at epoch {}'.format(self.epoch))
-        axs[2,0].set_xlabel('Covariate yrot -- x vals ')
-        axs[2,0].set_ylabel('q(u)')
+    #    axs[2,0].plot(self.xu_yrot.cpu().numpy(), qu_m_yrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    #    yrot_two_sigma = 2*np.sqrt(qu_S_yrot)
+    #    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    #    axs[2,0].fill_between(self.xu_yrot.cpu().numpy(), (qu_m_yrot-yrot_two_sigma), (qu_m_yrot+yrot_two_sigma), **kwargs)
+    #    axs[2,0].legend(loc='best')
+    #    axs[2,0].set_title('q(u) yrot covariate at epoch {}'.format(self.epoch))
+    #    axs[2,0].set_xlabel('Covariate yrot -- x vals ')
+    #    axs[2,0].set_ylabel('q(u)')
 
-        axs[2,1].plot(self.xu_zrot.cpu().numpy(), qu_m_zrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
-        zrot_two_sigma = 2*np.sqrt(qu_S_zrot)
-        kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
-        axs[2,1].fill_between(self.xu_zrot.cpu().numpy(), (qu_m_zrot-zrot_two_sigma), (qu_m_zrot+zrot_two_sigma), **kwargs)
-        axs[2,1].legend(loc='best')
-        axs[2,1].set_title('q(u) zrot covariate at epoch {}'.format(self.epoch))
-        axs[2,1].set_xlabel('Covariate zrot -- x vals ')
-        axs[2,1].set_ylabel('q(u)')
+    #    axs[2,1].plot(self.xu_zrot.cpu().numpy(), qu_m_zrot, c='darkblue', alpha=0.5, label = 'q(u) posterior mean')
+    #    zrot_two_sigma = 2*np.sqrt(qu_S_zrot)
+    #    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    #    axs[2,1].fill_between(self.xu_zrot.cpu().numpy(), (qu_m_zrot-zrot_two_sigma), (qu_m_zrot+zrot_two_sigma), **kwargs)
+    #    axs[2,1].legend(loc='best')
+    #    axs[2,1].set_title('q(u) zrot covariate at epoch {}'.format(self.epoch))
+    #    axs[2,1].set_xlabel('Covariate zrot -- x vals ')
+    #    axs[2,1].set_ylabel('q(u)')
 
         #and pass it to TB writer
-        self.writer.add_figure("q(u)_{}".format(log_type), fig)
+    #    self.writer.add_figure("q(u)_{}".format(log_type), fig)
 
-    def log_qkappa_plots(self, log_type):
-        """
-        Logs q(k) to tensorboard.
-        Plots only posterior --> prior is N(1, 0.5^2).
-        """
+    #def log_qkappa_plots(self, log_type):
+    #    """
+    #    Logs q(k) to tensorboard.
+    #    Plots only posterior --> prior is N(1, 0.5^2).
+    #    """
         #task
-        sa_task = self.gp_params['task']['sa'].detach().cpu().numpy().reshape(1)
-        std_task = np.exp(self.gp_params['task']['logstd'].detach().cpu().numpy())
-        task_gauss = norm(sa_task[0], scale = std_task[0])
-        x_task = np.linspace(task_gauss.ppf(0.01), task_gauss.ppf(0.99), 100)
-        y_task = task_gauss.pdf(x_task)
+    #    sa_task = self.gp_params['task']['sa'].detach().cpu().numpy().reshape(1)
+    #    std_task = np.exp(self.gp_params['task']['logstd'].detach().cpu().numpy())
+    #    task_gauss = norm(sa_task[0], scale = std_task[0])
+    #    x_task = np.linspace(task_gauss.ppf(0.01), task_gauss.ppf(0.99), 100)
+    #    y_task = task_gauss.pdf(x_task)
         #x
-        sa_x= self.gp_params['x']['sa'].detach().cpu().numpy().reshape(1)
-        std_x = np.exp(self.gp_params['x']['logstd'].detach().cpu().numpy())
-        x_gauss = norm(sa_x[0], scale = std_x[0])
-        x_x = np.linspace(x_gauss.ppf(0.01), x_gauss.ppf(0.99), 100)
-        y_x = x_gauss.pdf(x_x)
+    #    sa_x= self.gp_params['x']['sa'].detach().cpu().numpy().reshape(1)
+    #    std_x = np.exp(self.gp_params['x']['logstd'].detach().cpu().numpy())
+    #    x_gauss = norm(sa_x[0], scale = std_x[0])
+    #    x_x = np.linspace(x_gauss.ppf(0.01), x_gauss.ppf(0.99), 100)
+    #    y_x = x_gauss.pdf(x_x)
         #y
-        sa_y= self.gp_params['y']['sa'].detach().cpu().numpy().reshape(1)
-        std_y = np.exp(self.gp_params['y']['logstd'].detach().cpu().numpy())
-        y_gauss = norm(sa_y[0], scale = std_y[0])
-        x_y = np.linspace(y_gauss.ppf(0.01), y_gauss.ppf(0.99), 100)
-        y_y = y_gauss.pdf(x_y)
+    #    sa_y= self.gp_params['y']['sa'].detach().cpu().numpy().reshape(1)
+    #    std_y = np.exp(self.gp_params['y']['logstd'].detach().cpu().numpy())
+    #    y_gauss = norm(sa_y[0], scale = std_y[0])
+    #    x_y = np.linspace(y_gauss.ppf(0.01), y_gauss.ppf(0.99), 100)
+    #    y_y = y_gauss.pdf(x_y)
         #z
-        sa_z= self.gp_params['z']['sa'].detach().cpu().numpy().reshape(1)
-        std_z = np.exp(self.gp_params['z']['logstd'].detach().cpu().numpy())
-        z_gauss = norm(sa_z[0], scale = std_z[0])
-        x_z = np.linspace(z_gauss.ppf(0.01), z_gauss.ppf(0.99), 100)
-        y_z = z_gauss.pdf(x_z)
+    #    sa_z= self.gp_params['z']['sa'].detach().cpu().numpy().reshape(1)
+    #    std_z = np.exp(self.gp_params['z']['logstd'].detach().cpu().numpy())
+    #    z_gauss = norm(sa_z[0], scale = std_z[0])
+    #    x_z = np.linspace(z_gauss.ppf(0.01), z_gauss.ppf(0.99), 100)
+    #    y_z = z_gauss.pdf(x_z)
         #xrot
-        sa_xrot= self.gp_params['xrot']['sa'].detach().cpu().numpy().reshape(1)
-        std_xrot = np.exp(self.gp_params['xrot']['logstd'].detach().cpu().numpy())
-        xrot_gauss = norm(sa_xrot[0], scale = std_xrot[0])
-        x_xrot = np.linspace(xrot_gauss.ppf(0.01), xrot_gauss.ppf(0.99), 100)
-        y_xrot = xrot_gauss.pdf(x_xrot)
+    #    sa_xrot= self.gp_params['xrot']['sa'].detach().cpu().numpy().reshape(1)
+    #    std_xrot = np.exp(self.gp_params['xrot']['logstd'].detach().cpu().numpy())
+    #    xrot_gauss = norm(sa_xrot[0], scale = std_xrot[0])
+    #    x_xrot = np.linspace(xrot_gauss.ppf(0.01), xrot_gauss.ppf(0.99), 100)
+    #    y_xrot = xrot_gauss.pdf(x_xrot)
         #yrot
-        sa_yrot= self.gp_params['yrot']['sa'].detach().cpu().numpy().reshape(1)
-        std_yrot = np.exp(self.gp_params['yrot']['logstd'].detach().cpu().numpy())
-        yrot_gauss = norm(sa_yrot[0], scale = std_yrot[0])
-        x_yrot = np.linspace(yrot_gauss.ppf(0.01), yrot_gauss.ppf(0.99), 100)
-        y_yrot = yrot_gauss.pdf(x_yrot)
+    #    sa_yrot= self.gp_params['yrot']['sa'].detach().cpu().numpy().reshape(1)
+    #    std_yrot = np.exp(self.gp_params['yrot']['logstd'].detach().cpu().numpy())
+    #    yrot_gauss = norm(sa_yrot[0], scale = std_yrot[0])
+    #    x_yrot = np.linspace(yrot_gauss.ppf(0.01), yrot_gauss.ppf(0.99), 100)
+    #    y_yrot = yrot_gauss.pdf(x_yrot)
         #zrot
-        sa_zrot= self.gp_params['zrot']['sa'].detach().cpu().numpy().reshape(1)
-        std_zrot = np.exp(self.gp_params['zrot']['logstd'].detach().cpu().numpy())
-        zrot_gauss = norm(sa_zrot[0], scale = std_zrot[0])
-        x_zrot = np.linspace(zrot_gauss.ppf(0.01), zrot_gauss.ppf(0.99), 100)
-        y_zrot = zrot_gauss.pdf(x_zrot)
+    #    sa_zrot= self.gp_params['zrot']['sa'].detach().cpu().numpy().reshape(1)
+    #    std_zrot = np.exp(self.gp_params['zrot']['logstd'].detach().cpu().numpy())
+    #    zrot_gauss = norm(sa_zrot[0], scale = std_zrot[0])
+    #    x_zrot = np.linspace(zrot_gauss.ppf(0.01), zrot_gauss.ppf(0.99), 100)
+    #    y_zrot = zrot_gauss.pdf(x_zrot)
 
         #now create plot
-        fig, axs = plt.subplots(3,3, figsize=(15, 15))
-        axs[0,0].plot(x_task, y_task, lw=2, alpha = 0.5, color = 'green')
-        axs[0,0].set_title('Task q(k)')
-        axs[0,1].plot(x_x, y_x, lw=2, alpha = 0.5, color = 'blue')
-        axs[0,1].set_title('X q(k)')
-        axs[0,2].plot(x_y, y_y, lw=2, alpha = 0.5, color = 'orange')
-        axs[0,2].set_title('Y q(k)')
-        axs[1,0].plot(x_z, y_z, lw=2, alpha = 0.5, color = 'red')
-        axs[1,0].set_title('Z q(k)')
-        axs[1,1].plot(x_xrot, y_xrot, lw=2, alpha = 0.5, color = 'violet')
-        axs[1,1].set_title('Xrot q(k)')
-        axs[1,2].plot(x_yrot, y_yrot, lw=2, alpha = 0.5, color = 'magenta')
-        axs[1,2].set_title('Yrot q(k)')
-        axs[2,0].plot(x_zrot, y_zrot, lw=2, alpha = 0.5, color = 'purple')
-        axs[2,0].set_title('Zrot q(k)')
+    #    fig, axs = plt.subplots(3,3, figsize=(15, 15))
+    #    axs[0,0].plot(x_task, y_task, lw=2, alpha = 0.5, color = 'green')
+    #    axs[0,0].set_title('Task q(k)')
+    #    axs[0,1].plot(x_x, y_x, lw=2, alpha = 0.5, color = 'blue')
+    #    axs[0,1].set_title('X q(k)')
+    #    axs[0,2].plot(x_y, y_y, lw=2, alpha = 0.5, color = 'orange')
+    #    axs[0,2].set_title('Y q(k)')
+    #    axs[1,0].plot(x_z, y_z, lw=2, alpha = 0.5, color = 'red')
+    #    axs[1,0].set_title('Z q(k)')
+    #    axs[1,1].plot(x_xrot, y_xrot, lw=2, alpha = 0.5, color = 'violet')
+    #    axs[1,1].set_title('Xrot q(k)')
+    #    axs[1,2].plot(x_yrot, y_yrot, lw=2, alpha = 0.5, color = 'magenta')
+    #    axs[1,2].set_title('Yrot q(k)')
+    #    axs[2,0].plot(x_zrot, y_zrot, lw=2, alpha = 0.5, color = 'purple')
+    #    axs[2,0].set_title('Zrot q(k)')
         #pass it to TB writer
-        self.writer.add_figure("q(k)_{}".format(log_type), fig)
+    #    self.writer.add_figure("q(k)_{}".format(log_type), fig)
 
-    def log_beta(self, xq, beta_mean, beta_cov, covariate_name, log_type):
-        """
-        Logs beta dist plots to TB.
-        This is done from within fwd method.
-        """
-        cov_dict = {}
-        xq = xq.cpu().numpy()
-        beta_mean = beta_mean.detach().cpu().numpy()
-        two_sigma = 2*np.sqrt(np.diag(beta_cov.detach().cpu().numpy()))
-        cov_dict['xq'] = xq
-        cov_dict['mean'] = beta_mean
-        cov_dict['two_sig'] = two_sigma
-        cov_data = pd.DataFrame.from_dict(cov_dict)
-        sorted_cov_data = cov_data.sort_values(by=["xq"])
-        fig = plt.figure()
-        plt.plot(sorted_cov_data['xq'], sorted_cov_data['mean'], \
-        c='darkblue', alpha=0.5, label='Beta posterior mean')
-        kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
-        plt.fill_between(sorted_cov_data['xq'], (sorted_cov_data['mean'] - sorted_cov_data['two_sig']), \
-        (sorted_cov_data['mean'] + sorted_cov_data['two_sig']), **kwargs)
-        plt.legend(loc='best')
-        plt.title('Beta_{}'.format(covariate_name))
-        plt.xlabel('Covariate')
-        plt.ylabel('Beta Ouput')
-        self.writer.add_figure("Beta/{}_{}".format(covariate_name, log_type), fig)
+    #def log_beta(self, xq, beta_mean, beta_cov, covariate_name, log_type):
+    #    """
+    #    Logs beta dist plots to TB.
+    #    This is done from within fwd method.
+    #    """
+    #    cov_dict = {}
+    #    xq = xq.cpu().numpy()
+    #    beta_mean = beta_mean.detach().cpu().numpy()
+    #    two_sigma = 2*np.sqrt(np.diag(beta_cov.detach().cpu().numpy()))
+    #    cov_dict['xq'] = xq
+    #    cov_dict['mean'] = beta_mean
+    #    cov_dict['two_sig'] = two_sigma
+    #    cov_data = pd.DataFrame.from_dict(cov_dict)
+    #    sorted_cov_data = cov_data.sort_values(by=["xq"])
+    #    fig = plt.figure()
+    #    plt.plot(sorted_cov_data['xq'], sorted_cov_data['mean'], \
+    #    c='darkblue', alpha=0.5, label='Beta posterior mean')
+    #    kwargs = {'color':'lightblue', 'alpha':0.3, 'label':'2 sigma'}
+    #    plt.fill_between(sorted_cov_data['xq'], (sorted_cov_data['mean'] - sorted_cov_data['two_sig']), \
+    #    (sorted_cov_data['mean'] + sorted_cov_data['two_sig']), **kwargs)
+    #    plt.legend(loc='best')
+    #    plt.title('Beta_{}'.format(covariate_name))
+    #    plt.xlabel('Covariate')
+    #    plt.ylabel('Beta Ouput')
+    #    self.writer.add_figure("Beta/{}_{}".format(covariate_name, log_type), fig)
 
-    def log_map(self, map, slice, map_name, batch_size, log_type):
-        """
-        Logs a particular brain map reconstruction to TB.
+    #def log_map(self, map, slice, map_name, batch_size, log_type):
+    #    """
+    #    Logs a particular brain map reconstruction to TB.
 
-        Args
-        ----
-        Map: (np array) map reconstructions for a given minibatch.
-        slice: (int) specific slice we wish to log.
-        map_name: (string) Name of map (e.g., base, task)
-        batch_size: (int) Size of minibatch.
-        For now am logging slices only in saggital view.
-        """
-        map = map.reshape((batch_size, IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
-        for i in range(batch_size):
-            slc = map[i, slice, :, :]
-            slc = ndimage.rotate(slc, 90)
-            fig_name = '{}_{}_{}/{}'.format(map_name, log_type, slice, i)
-            self.writer.add_image(fig_name, slc, dataformats='HW')
+    #    Args
+    #    ----
+    #    Map: (np array) map reconstructions for a given minibatch.
+    #    slice: (int) specific slice we wish to log.
+    #    map_name: (string) Name of map (e.g., base, task)
+    #    batch_size: (int) Size of minibatch.
+    #    For now am logging slices only in saggital view.
+    #    """
+    #    map = map.reshape((batch_size, IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]))
+    #    for i in range(batch_size):
+    #        slc = map[i, slice, :, :]
+    #        slc = ndimage.rotate(slc, 90)
+    #        fig_name = '{}_{}_{}/{}'.format(map_name, log_type, slice, i)
+    #        self.writer.add_image(fig_name, slc, dataformats='HW')
 
     def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
         print("="*40)
@@ -888,8 +888,8 @@ class VAE(nn.Module):
             loss = self.train_epoch(loaders['Shuffled_train'])
             self.loss['train'][epoch] = loss
             self.writer.add_scalar("Loss/Train", loss, self.epoch)
-            self.log_qu_plots('train')
-            self.log_qkappa_plots('train')
+            utils.log_qu_plots(self.epoch, self.gp_params, self.writer, 'train')
+            utils.log_qkappa_plots(self.gp_params, self.writer, 'train')
             self.writer.flush()
             # Run through the test data and record a loss.
             if (test_freq is not None) and (epoch % test_freq == 0):
