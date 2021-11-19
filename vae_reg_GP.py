@@ -1,9 +1,6 @@
 """
-VAE-GAM model implementation.
+VAE-GAM model implementation w/ added GAN regularization in latent space.
 
-Gaussian Procress regression implementation is contained separately in the gp.py module.
-
-To train model, plot GPs or create brain maps reconstructions --> use multsubj_reg_run.py as detailed in README.
 """
 
 import gp
@@ -33,8 +30,8 @@ IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", \
-    num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_files='', neural_covariates=True):
+    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", num_inducing_pts=6, \
+    gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_files='', neural_covariates=True, D_weight=1, train_ratio=4):
         super(VAE, self).__init__()
         self.nf = nf
         self.save_dir = save_dir
@@ -43,6 +40,10 @@ class VAE(nn.Module):
         self.num_latents = num_latents
         self.neural_covariates = neural_covariates
         self.z_dim = self.num_latents + self.num_covariates + 1
+        #add weight factor for D_loss piece
+        self.D_weight = D_weight
+        #add ratio for how often to update discriminator vs. VAE(gen) --> 3:1 should be ok
+        self.train_ratio=train_ratio
         assert device_name != "cuda" or torch.cuda.is_available()
         if device_name == "auto":
             device_name = "cuda" if torch.cuda.is_available() else "cpu"
@@ -212,6 +213,11 @@ class VAE(nn.Module):
         self.bnt3 = nn.BatchNorm3d(2*self.nf, track_running_stats=False)
         self.bnt5 = nn.BatchNorm3d(self.nf, track_running_stats=False)
 
+        #Discriminator
+        self.fc9 = nn.Linear(self.num_latents, 16)
+        self.fc10= nn.Linear(16, 16)
+        self.fc11= nn.Linear(16, 1)
+
     def _get_layers(self):
         """Return a dictionary mapping names to network layers.
         Again, adaptions here were minimal -- enough to match layers defined
@@ -220,7 +226,8 @@ class VAE(nn.Module):
         return {'fc1':self.fc1, 'fc2':self.fc2, 'fc31':self.fc31,
                 'fc32':self.fc32, 'fc33':self.fc33, 'fc41':self.fc41,
                 'fc42':self.fc42, 'fc43':self.fc43, 'fc5':self.fc5,
-                'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8, 'bn1':self.bn1,
+                'fc6':self.fc6, 'fc7':self.fc7, 'fc8':self.fc8, 'fc9':self.fc9,
+                'fc10':self.fc10, 'fc11':self.fc11, 'bn1':self.bn1,
                 'bn3':self.bn3, 'bn5':self.bn5,'bnt1':self.bnt1, 'bnt3':self.bnt3,
                 'bnt5':self.bnt5, 'conv1':self.conv1,'conv2':self.conv2,
                 'conv3':self.conv3, 'conv4':self.conv4,
@@ -257,6 +264,12 @@ class VAE(nn.Module):
         h = F.relu(self.convt3(self.bnt3(h)))
         h = F.relu(self.convt4(h))
         return torch.sigmoid(self.convt5(self.bnt5(h)).squeeze(1).view(-1,IMG_DIM))
+
+    def discriminate(self, z):
+        h = F.relu(self.fc9(z))
+        h = F.relu(self.fc10(h))
+        ans = self.fc11(h)
+        return ans
 
     def calc_linW_KL(self, sa, std):
         """
@@ -299,7 +312,21 @@ class VAE(nn.Module):
         convolved_signal = convolved_signal.squeeze(0)[:-len_to_remove]
         return convolved_signal
 
-    def forward(self, ids, covariates, x, log_type, return_latent_rec=False, train_mode=True):
+    def split_disc_out(self, output, covariates):
+        """
+        Splits batch elements (x) into task and notask items.
+        These will be fed separately to encoder and discriminator --> compute GAN regularization term
+        For regular VAE loss, zs from both conditions are concatenated and fed to decoder.
+        """
+        task_mask = covariates==1
+        task_idxs = torch.nonzero(task_mask).T.squeeze(0)
+        notask_mask = covariates==0
+        notask_idxs = torch.nonzero(notask_mask).T.squeeze(0)
+        task_outputs = output.index_select(0, task_idxs)
+        notask_outputs = output.index_select(0, notask_idxs)
+        return task_outputs.mean(0), notask_outputs.mean(0)
+
+    def forward(self, ids, covariates, x, log_type,  batch_idx, return_latent_rec=False, train_mode=True):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
         'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
         imgs_keys = list(imgs.keys())
@@ -310,14 +337,22 @@ class VAE(nn.Module):
         glm_reg = 0
         #getting z's using encoder
         mu, u, d = self.encode(x)
-        #check if d is not too small
-        #if d is too small, add a small # before using it
-        #this solves some numerical instability issues I had at the beginning.
+        #add small number to d's as needed
         d_small = d[d<1e-6]
         if len(d_small)>= 1:
             d = d.add(1e-6)
+        #induce latent dist
         latent_dist = LowRankMultivariateNormal(mu, u, d)
-        z = latent_dist.rsample()
+        #take samples
+        z = latent_dist .rsample()
+        z_detached = z.detach() #takes away graph used to gen z
+        #get discriminator loss for z's
+        D_output = self.discriminate(z_detached)
+        #split these between task/notask
+        task_D, notask_D = self.split_disc_out(D_output, covariates[:, 0])
+        #and compute D_loss
+        D_loss = -(notask_D - task_D)
+        #now carry rest of fwd as usual
         base_oh = torch.nn.functional.one_hot(torch.zeros(ids.shape[0],\
         dtype=torch.int64), self.num_covariates+1)
         base_oh = base_oh.to(self.device).float()
@@ -342,7 +377,8 @@ class VAE(nn.Module):
             self.gp_params[gp_params_keys[i-1]]['logstd'][0].exp())
             gp_kl_loss += gp_linW_kl
             beta_mean = self.gp_params[gp_params_keys[i-1]]['sa'][0] * xq
-            beta_cov = torch.pow(self.gp_params[gp_params_keys[i-1]]['logstd'][0].exp(), 2)* torch.pow(xq, 2) * torch.eye(ids.shape[0]).to(self.device)
+            beta_cov = torch.pow(self.gp_params[gp_params_keys[i-1]]['logstd'][0].exp(), 2)* torch.pow(xq, 2) * \
+            torch.eye(ids.shape[0]).to(self.device)
             if i!=1:
                 #get params for non-linear (GP) piece of gain
                 Xu = self.gp_params[gp_params_keys[i-1]]['xu']
@@ -357,9 +393,11 @@ class VAE(nn.Module):
                 beta_mean += f_bar
                 beta_cov += Sigma
                 #now get Kl for non-linear GP term.
-                gp_kl = gp_regressor.compute_GP_kl(self.inducing_pts, i, xq, self.save_dir) #adding i, xq and save_dir here to troubleshoot issues with qu_S.
+                #adding i, xq and save_dir as args below to troubleshoot issues with qu_S.
+                gp_kl = gp_regressor.compute_GP_kl(self.inducing_pts, i, xq, self.save_dir)
                 gp_kl_loss += gp_kl
-            beta_dist = MultivariateNormal(beta_mean, (beta_cov + 1e-5*torch.eye(ids.shape[0]).to(self.device))) #added here a small fudge factor for stability.
+            #added here a small fudge factor for stability.
+            beta_dist = MultivariateNormal(beta_mean, (beta_cov + 1e-5*torch.eye(ids.shape[0]).to(self.device)))
             task_var = beta_dist.rsample()
             if train_mode:
                 #add beta plot to TB
@@ -400,15 +438,27 @@ class VAE(nn.Module):
         elbo = elbo + sum_log_prob
         #contract all values using torch.mean()
         elbo = torch.mean(elbo, dim=0)
-        #now add all losses for compound objective.
-        tot_loss = -elbo + self.gp_kl_scale*(gp_kl_loss) + self.glm_reg_scale*(glm_reg)
+        if self.epoch % self.train_ratio==0:
+            #eif either are at epoch==0 or at a generator update epoch
+            #train VAE-GAM generator
+            tot_loss = -elbo + self.gp_kl_scale*(gp_kl_loss) + self.glm_reg_scale*(glm_reg) + self.D_weight*D_loss.detach()
+        else:
+            #train discriminator
+            tot_loss = -elbo.detach() + self.gp_kl_scale*(gp_kl_loss).detach() + self.glm_reg_scale*(glm_reg).detach() + \
+            self.D_weight*D_loss
+        #get separate loss terms, we will log these to TB.
+        D_loss_term = (self.D_weight*D_loss).detach().cpu().numpy()
+        G_loss_term =  -elbo.detach().cpu().numpy() + (self.gp_kl_scale*gp_kl_loss).detach().cpu().numpy() + \
+        (self.glm_reg_scale*glm_reg).detach().cpu().numpy()
         if return_latent_rec:
-            return tot_loss, z.detach().cpu().numpy(), imgs
-        return tot_loss
+            return tot_loss, D_loss_term, G_loss_term, z.detach().cpu().numpy(), imgs
+        return tot_loss, D_loss_term, G_loss_term
 
     def train_epoch(self, train_loader):
         self.train()
         train_loss = 0.0
+        disc_loss = 0.0
+        gen_loss = 0.0
         for batch_idx, sample in enumerate(train_loader):
             x = sample['volume']
             x = x.to(self.device)
@@ -416,19 +466,31 @@ class VAE(nn.Module):
             covariates = covariates.to(self.device)
             ids = sample['subjid']
             ids = ids.to(self.device)
-            loss = self.forward(ids, covariates, x, 'train', train_mode=True)
+            loss, d_loss, g_loss = self.forward(ids, covariates, x, 'train', batch_idx, train_mode=True)
             train_loss += loss.item()
+            disc_loss += d_loss.item()
+            gen_loss += g_loss.item()
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+        #clamp weights for discriminator layers
+        layers = self._get_layers()
+        for layer_name in layers:
+            if layer_name in ['fc9', 'fc10', 'fc11']:
+                layers[layer_name].weight.clamp(-0.01, 0.01)
+        #report epoch avg loss
         train_loss /= len(train_loader.dataset)
+        disc_loss /= len(train_loader.dataset)
+        gen_loss /= len(train_loader.dataset)
         print('Epoch: {} Average loss: {:.4f}'.format(self.epoch, train_loss))
         self.epoch += 1
-        return train_loss
+        return train_loss, disc_loss, gen_loss
 
     def test_epoch(self, test_loader):
         self.eval()
         test_loss = 0.0
+        disc_loss = 0.0
+        gen_loss = 0.0
         with torch.no_grad():
             for i, sample in enumerate(test_loader):
                 x = sample['volume']
@@ -437,11 +499,15 @@ class VAE(nn.Module):
                 covariates = covariates.to(self.device)
                 ids = sample['subjid']
                 ids = ids.to(self.device)
-                loss = self.forward(ids, covariates, x, 'test', train_mode=False)
+                loss, d_loss, g_loss = self.forward(ids, covariates, x, 'test', i, train_mode=False)
                 test_loss += loss.item()
+                disc_loss += d_loss.item()
+                gen_loss += g_loss.item()
         test_loss /= len(test_loader.dataset)
+        disc_loss /= len(test_loader.dataset)
+        gen_loss /= len(test_loader.dataset)
         print('Test loss: {:.4f}'.format(test_loss))
-        return test_loss
+        return test_loss, disc_loss, gen_loss
 
     def save_state(self, filename):
         layers = self._get_layers()
@@ -458,6 +524,8 @@ class VAE(nn.Module):
         state['glm_reg_scale'] = self.glm_reg_scale
         state['gp_kl_scale'] = self.gp_kl_scale
         state['inducing_pts'] = self.inducing_pts
+        state['D_weight'] = self.D_weight
+        state['train_ratio'] = self.train_ratio
         #save only GP_params dict to checkpoint
         #this already includes all linear and non-linear terms we want.
         state['gp_params'] = self.gp_params
@@ -478,6 +546,8 @@ class VAE(nn.Module):
         self.glm_reg_scale = checkpoint['glm_reg_scale']
         self.gp_kl_scale = checkpoint['gp_kl_scale']
         self.inducing_pts = checkpoint['inducing_pts']
+        self.D_weight= checkpoint['D_weight']
+        self.train_ratio=checkpoint['train_ratio']
         #load in gp_params dict
         self.gp_params = checkpoint['gp_params']
         # and individual 1D gp params
@@ -549,24 +619,14 @@ class VAE(nn.Module):
         metric='euclidean', random_state=42)
         projection = transform.fit_transform(latent)
         # And plot them
-        c_list = ['b','g','r','c','m','y','k','orange','blueviolet','hotpink',\
-        'lime','skyblue','teal','sienna']
-        colors = itertools.cycle(c_list)
         data_chunks = range(0,len(loaders_dict['UnShuffled_train'].dataset),split)
         for i in data_chunks:
             #commented code below can be used if desiring to plot LS by time pt OR by task/no-task
-            #t = np.arange(split)
-            #task = np.concatenate((np.zeros(14), np.ones(14)))
-            #task = np.tile(task, 3)
-            #task = np.concatenate((task, np.zeros(14)))
-            #curr version plots LS by subj.
+            task = np.concatenate((np.ones(14), np.zeros(14)))
+            task = np.tile(task, 3)
+            task = np.concatenate((task, np.ones(14)))
             plt.scatter(projection[i:i+split,0], projection[i:i+split,1],\
-            color=next(colors), s=1.0, alpha=0.6)
-            #if plotting by task/no-task
-            #plt.scatter(projection[i:i+split,0], projection[i:i+split,1],\
-            #c=task, s=1.0, alpha=0.6)
-            #if plotting by time.
-            #plt.scatter(projection[i:i+split,0], projection[i:i+split,1], c=t, s=1.0, alpha=0.6)
+            c=task, s=1.0, alpha=0.6)
             plt.axis('off')
         if title is not None:
             plt.title(title)
@@ -593,7 +653,7 @@ class VAE(nn.Module):
                 ids = ids.to(self.device)
                 vol_num = sample['vol_num']
                 subjidx = sample['subjid']
-                _, _, imgs = self.forward(ids, covariates, x, 'reconstruction', return_latent_rec = True, train_mode=False)
+                _, _, _, _, imgs = self.forward(ids, covariates, x, 'reconstruction', i, return_latent_rec = True, train_mode=False)
                 for key in imgs.keys():
                     gen_filename = 'recon_{}.nii'.format(key)
                     for i in range(ids.shape[0]):
@@ -679,7 +739,7 @@ class VAE(nn.Module):
             file_path = os.path.join(plot_dir, filename)
             plt.savefig(file_path)
 
-    def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, save_dir = ''):
+    def train_loop(self, loaders, epochs=100, test_freq=2, save_freq=10, plot_freq=50, save_dir = ''):
         print("="*40)
         print("Training: epochs", self.epoch, "to", self.epoch+epochs-1)
         print("Training set:", len(loaders['Shuffled_train'].dataset))
@@ -688,21 +748,26 @@ class VAE(nn.Module):
         # For some number of epochs...
         for epoch in range(self.epoch, self.epoch+epochs):
             #Run through the training data and record a loss.
-            loss = self.train_epoch(loaders['Shuffled_train'])
+            loss, disc_loss, gen_loss = self.train_epoch(loaders['Shuffled_train'])
             self.loss['train'][epoch] = loss
             self.writer.add_scalar("Loss/Train", loss, self.epoch)
+            self.writer.add_scalar("Loss/Discriminator", disc_loss, self.epoch)
+            self.writer.add_scalar("Loss/Generator", gen_loss, self.epoch)
             utils.log_qu_plots(self.epoch, self.gp_params, self.writer, 'train')
             utils.log_qkappa_plots(self.gp_params, self.writer, 'train')
             self.writer.flush()
             # Run through the test data and record a loss.
             if (test_freq is not None) and (epoch % test_freq == 0):
-                loss = self.test_epoch(loaders['test'])
+                loss, _, _ = self.test_epoch(loaders['test'])
                 self.loss['test'][epoch] = loss
             # Save the model.
             if (save_freq is not None) and (epoch % save_freq == 0) and (epoch > 0):
                 filename = "checkpoint_"+str(epoch).zfill(3)+'.tar'
                 file_path = os.path.join(save_dir, filename)
                 self.save_state(file_path)
+            #plot latents (to check if discriminator is indeed working here)
+            if (plot_freq is not None) and (epoch % plot_freq==0):
+                self.project_latent(loaders, self.save_dir)
         self.writer.close()
 
 if __name__ == "__main__":

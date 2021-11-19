@@ -34,6 +34,8 @@ parser.add_argument('--save_freq', type=int, default=100, metavar='N', \
 help='How many epochs to wait before saving training status.')
 parser.add_argument('--test_freq', type=int, default=200, metavar='N', \
 help='How many epochs to wait before testing.')
+parser.add_argument('--plot_freq', type=int, default=50, metavar='N', \
+help='How many epochs to wait before constructing and saving a LS plot.')
 parser.add_argument('--split', type=int, metavar='N', default=98, \
 help='Number used to change colors when plotting VAE latent projection. This is # of volumes for each subj -- i.e., color scheme is per subj.')
 parser.add_argument('--glm_reg_scale', type=float, metavar='N', default=1.0, \
@@ -44,6 +46,10 @@ parser.add_argument('--num_inducing_pts', type=int, metavar='N', default=6, \
 help='Number of inducing points for each regressor 1D GP.')
 parser.add_argument('--gp_kl_scale', type=float, metavar='N', default=10.0, \
 help='Scaling factor for KL divergence loss terms coming from linear and non-linear (GP) pieces of gamma.')
+parser.add_argument('--D_weight', type=float, metavar='N', default=1.0, \
+help='Scaling factor for Discriminator loss term.')
+parser.add_argument('--train_ratio', type=float, metavar='N', default=4.0, \
+help='Ratio between training freq for discriminator vs. VAE(generator). Default is 3:1')
 parser.add_argument('--from_ckpt', type=str2bool, nargs='?', const=True, default=False, \
 help='Boolean flag indicating if training and/or reconstruction should be carried using a pre-trained model state.')
 parser.add_argument('--ckpt_path', type=str, metavar='N', default='', \
@@ -69,7 +75,7 @@ if __name__ == "__main__":
 	loaders_dict = data.setup_data_loaders(batch_size=args.batch_size, train_csv = args.train_csv, test_csv = args.test_csv)
 	model = vae_reg.VAE(num_inducing_pts = args.num_inducing_pts, gp_kl_scale = args.gp_kl_scale, \
 	glm_reg_scale = args.glm_reg_scale, glm_maps = args.glm_maps, save_dir = args.save_dir, \
-	csv_files = [args.train_csv, args.test_csv], neural_covariates=args.neural_covariates)
+	csv_files = [args.train_csv, args.test_csv], neural_covariates=args.neural_covariates, D_weight=args.D_weight, train_ratio=args.train_ratio)
 	if args.from_ckpt == True:
 		assert os.path.exists(args.ckpt_path), 'Oops, looks like ckpt file given does NOT exist!'
 		print('='*40)
@@ -77,7 +83,7 @@ if __name__ == "__main__":
 		model.load_state(filename = args.ckpt_path)
 	if args.recons_only == False:
 		model.train_loop(loaders_dict, epochs = args.epochs, test_freq = args.test_freq,\
-		save_freq = args.save_freq, save_dir=args.save_dir)
+		save_freq = args.save_freq, save_dir=args.save_dir, plot_freq=args.plot_freq)
 		#again, am using train set when plotting 1D GPs, plotting LS UMAPPING and creating reconstructions...
 		#this can be changed if desired.
 		model.project_latent(loaders_dict, title = "Latent Space plot", split=args.split, save_dir=args.save_dir)
