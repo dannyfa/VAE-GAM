@@ -23,8 +23,7 @@ To generate the csv_file to be used by DataClass and Loaders: <br>
 <br>
 <strong> 1)Run pre_proc_vaefmri.py </strong> <br>
 <br>
-  <em> python pre_proc_vaefmri.py --data_dir {dir w/ your preprocessed fMRI data} --save_dir {dir where you want your csv_file saved to} <br>
-  --nii_file_pattern {your_nii_filename_pattern} --mot_file_pattern {your_mot_filename_pattern} </em> <br>
+  <em> python pre_proc_vaefmri.py --data_dir {dir w/ your preprocessed fMRI data} --save_dir {dir where you want your csv_file saved to} --nii_file_pattern {your_nii_filename_pattern} --mot_file_pattern {your_mot_filename_pattern} </em> <br>
 
   The last 2 flags refer to filename patterns for your pre-processed fMRI data (assumes nifti format!) and for the motion files generated during preprocessing. <br>
 
@@ -34,7 +33,7 @@ To generate the csv_file to be used by DataClass and Loaders: <br>
  <br>
   This script will generate a rough (least-squares estimate) map using the preprocessed fMRI data and their corresponding design matrices (produced using std GLM software like FSL). This rough map is used as a regularizer, so as to encourage our model to produce maps that are not too far off from main effects expected using GLM approach. This regularizer was not needed when running control experiments, only for actual biological signals like V1 signal/experiments showcased in paper. <br>
   <br>
-  <em> python get_beta_map_regularizer.py --root_dir {dir w/ pre-processed fMRI data} --output_dir {dir where you want the lsqrs map to.} --data_dims {x, y, z, time - these are the dimensions for 4D fMRI data.}<br></em>
+  <em> python get_beta_map_regularizer.py --root_dir {dir w/ pre-processed fMRI data} --output_dir {dir where you want the lsqrs map saved to.} --data_dims {x, y, z, time - these are the dimensions for your 4D fMRI data.}<br></em>
 
  <strong>  3)Train model </strong> <br>
  <br>
@@ -52,7 +51,7 @@ To generate the csv_file to be used by DataClass and Loaders: <br>
  by changing values of <em> --gp_kl_scale </em> , <em> --glm_reg_scale </em> and <em> --num_inducing_pts </em> respectively. However, we do not advise doing so unless you fully understand rest of code.
  <br>
 
- Finally this script also takes a <em> --neural_covariates </em> flag, which indicates wether coveriates passed are real/bilogical or synthetic. Default is 'True', meaning code will treat covariates passed as being real biologically-relevant signals, which will be convolved with HRF. Note that last 6 covariates passed in csv file are assumed to be motion-related nuisance covariates. These are NEVER convolved with the HRF (regardless of choice for this flag).
+ Finally this script also takes a <em> --neural_covariates </em> flag, which indicates wether covariates passed are real/bilogical or synthetic. Default is 'True', meaning code will treat covariates passed as being real biologically-relevant signals, which will be convolved with HRF. Note that last 6 covariates passed in csv file are assumed to be motion-related nuisance covariates. These are NEVER convolved with the HRF (regardless of choice for this flag).
 <br>
 <br>
 
@@ -63,7 +62,7 @@ To construct data sets with the synthetic signals shown in paper, run the follow
 <em> python add_control_signal.py --root_dir {dir with preprocessed fMRI data we wish to add synthetic signal to} --intensity {intensity of added singal} --shape {'Large3'} --nii_file_pattern {filename pattern for nifti files under root_dir to be used.}</em><br>
 <br>
 Of note, this script <strong> WILL NOT </strong> overwrite the data under <em> --root_dir </em>.
-Instead, it will write data with synthetic signal to <em> --root_dir </em> with same name as original + suffix 'ALTERED_Large3_{intensity}_simple_ts_{date_stamp}.nii.gz' <br>
+Instead, it will write data with synthetic signal to <em> --root_dir </em> with same name as original + suffix 'ALTERED_Large3_{intensity}_\\simple_ts_\\{date_stamp}.nii.gz' <br>
 
 For any questions regarding this repository, the paper, replicating our simulations or extending this work please contact Daniela de Albuquerque -- dfd4@duke.edu.
 <br>
