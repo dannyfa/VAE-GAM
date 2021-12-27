@@ -1,0 +1,13 @@
+torch >= 1.7.1
+torchvision >= 0.8.2
+numpy
+pandas >= 1.0.5
+nibabel >= 2.5.1
+scipy
+pillow == 8.1.0
+scikit-learn >= 0.23.2
+matplotlib >= 3.2.2
+tensorboard >= 1.15.0
+copy
+itertools
+umap-learn >= 0.3.10
