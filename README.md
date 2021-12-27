@@ -62,7 +62,7 @@ To construct data sets with the synthetic signals shown in paper, run the follow
 <em> python add_control_signal.py --root_dir {dir with preprocessed fMRI data we wish to add synthetic signal to} --intensity {intensity of added singal} --shape {'Large3'} --nii_file_pattern {filename pattern for nifti files under root_dir to be used.}</em><br>
 <br>
 Of note, this script <strong> WILL NOT </strong> overwrite the data under <em> --root_dir </em>.
-Instead, it will write data with synthetic signal to <em> --root_dir </em> with same name as original + suffix 'ALTERED_Large3_{intensity}_\\simple_ts_\\{date_stamp}.nii.gz' <br>
+Instead, it will write data with synthetic signal to <em> --root_dir </em> with same name as original + suffix 'ALTERED_Large3_intensity_simple_ts_date_stamp.nii.gz' <br>
 
 For any questions regarding this repository, the paper, replicating our simulations or extending this work please contact Daniela de Albuquerque -- dfd4@duke.edu.
 <br>
