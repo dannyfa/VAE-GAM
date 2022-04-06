@@ -42,6 +42,8 @@ class FMRIDataset(Dataset):
         rot_x = self.df.iloc[idx,8]
         rot_y = self.df.iloc[idx,9]
         rot_z = self.df.iloc[idx,10]
+        #gender/sex
+        sex = self.df.iloc[idx, 11]
 
         fmri = np.array(nib.load(nii).dataobj)
         max = 3284.5 #across all vols. Used to scale data (globally).
@@ -51,7 +53,7 @@ class FMRIDataset(Dataset):
         #now create sample.
         sample = {'subj_idx': subj_idx, 'subj': subj, 'volume': scld_vol, 'vol_num':vol_num,
                   'task':task, 'trans_x':trans_x, 'trans_y':trans_y, 'trans_z':trans_z,
-                  'rot_x':rot_x, 'rot_y':rot_y, 'rot_z':rot_z}
+                  'rot_x':rot_x, 'rot_y':rot_y, 'rot_z':rot_z, 'sex':sex}
         if self.transform:
             sample = self.transform(sample)
         return(sample)
@@ -62,7 +64,7 @@ class ToTensor(object):
         subjid, volume, vol_num = sample['subj_idx'], sample['volume'], sample['vol_num']
         #Concat task w/ mot params by row
         covars = np.array([sample['task'], sample['trans_x'], sample['trans_y'], \
-        sample['trans_z'], sample['rot_x'], sample['rot_y'], sample['rot_z']], dtype=np.float64)
+        sample['trans_z'], sample['rot_x'], sample['rot_y'], sample['rot_z'], sample['sex']], dtype=np.float64)
         return{'covariates':torch.from_numpy(covars).float(),
                 'volume': torch.from_numpy(volume).float(),
                 'subjid': torch.tensor(subjid, dtype=torch.int64),

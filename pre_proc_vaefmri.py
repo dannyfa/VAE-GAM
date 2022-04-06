@@ -37,6 +37,9 @@ help='General pattern for filenames of nifti files to be used. Can contain any w
 parser.add_argument('--mot_file_pattern', type=str, metavar='N', \
 default='sub-A000*_task-CHECKERBOARD_acq-1400_desc-confounds_regressors_*.tsv', \
 help='General pattern for filenames of motion files to be used. Can contain any wildcard that glob and rgob can handle.')
+parser.add_argument('--sex_info', type=str, metavar='N', \
+default='', help="""Csv file containing information on subject sex/gender.Should have 2 cols, one for sujID and another
+for binary coded sex - 0(MALE) and 1(FEMALE)""")
 
 args = parser.parse_args()
 
@@ -88,11 +91,15 @@ for i in range(len(subjs)):
 raw_df = {'nii_files': raw_data_files, 'subjs': subjs, 'regressors': raw_reg_files}
 raw_df = pd.DataFrame(raw_df)
 
+#read file w/ sex information
+sex_df = pd.read_csv(args.sex_info)
 
 #Building final csv file
 samples = []
 for i in raw_df['subjs']:
     subjid = i
+    #get sex/gender info for subjs
+    subj_sex = sex_df.loc[sex_df['subjID'] == i, 'gender '].iloc[0]
     raw_reg = raw_df.loc[raw_df['subjs'] == i, 'regressors'].iloc[0]
     regressors = pd.read_csv(raw_reg, sep='\t', index_col=False)
     trans_x, trans_y, trans_z = regressors['trans_x'], regressors['trans_y'], regressors['trans_z']
@@ -113,11 +120,11 @@ for i in raw_df['subjs']:
     for vol in range(vols):
         sample = (subjid, vol, raw_nii, neural[vol], trans_x[vol], \
         trans_y[vol], trans_z[vol], rot_x[vol], rot_y[vol], \
-        rot_z[vol])
+        rot_z[vol], subj_sex)
         samples.append(sample)
 
 new_df = pd.DataFrame(list(samples), columns=["subjid","volume #", "nii_path", "task", \
-"x", "y", "z", "rot_x", "rot_y", "rot_z"])
+"x", "y", "z", "rot_x", "rot_y", "rot_z", "sex"])
 #z-score motion variables
 zscored_df = utils.zscore(new_df)
 ts = datetime.datetime.now().date()

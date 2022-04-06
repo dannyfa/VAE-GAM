@@ -33,7 +33,7 @@ IMG_SHAPE = (41,49,35)
 IMG_DIM = np.prod(IMG_SHAPE)
 
 class VAE(nn.Module):
-    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=7, num_latents=32, device_name="auto", \
+    def __init__(self, nf=8, save_dir='', lr=1e-3, num_covariates=8, num_latents=32, device_name="auto", \
     num_inducing_pts=6, gp_kl_scale=10.0, glm_maps = '', glm_reg_scale=1.0, csv_files='', neural_covariates=True):
         super(VAE, self).__init__()
         self.nf = nf
@@ -56,7 +56,7 @@ class VAE(nn.Module):
         self.epsilon = torch.nn.Parameter(epsilon)
         #read in GLM maps for regularization term
         glm_maps = pd.read_csv(glm_maps).to_numpy()
-        self.glm_maps = torch.from_numpy(glm_maps).to(self.device) #shape is 70,315x8
+        self.glm_maps = torch.from_numpy(glm_maps).to(self.device) #shape is 70,315x9
         self.glm_reg_scale = glm_reg_scale
         self.inducing_pts = num_inducing_pts
         self.gp_kl_scale = torch.as_tensor((gp_kl_scale)).to(self.device)
@@ -65,7 +65,7 @@ class VAE(nn.Module):
         #get ranges for 1D GPs
         xu_ranges = utils.get_xu_ranges(csv_files)
 		#init params for GPs
-        self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}}
+        self.gp_params  = {'task':{}, 'x':{}, 'y':{}, 'z':{}, 'xrot':{}, 'yrot':{}, 'zrot':{}, 'sex':{}}
         #for task
         #initialize params representing linear term posterior mean (sa) and log std (logstd)
         #no params for non-linear GP piece here --> this is a binary variable!!
@@ -165,6 +165,11 @@ class VAE(nn.Module):
         self.gp_params['zrot']['sa'] = self.sa_zrot
         self.logstd_zrot = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
         self.gp_params['zrot']['logstd'] = self.logstd_zrot
+        #init GP (linear term only) for binary sex covariate
+        self.sa_sex = torch.nn.Parameter(torch.normal(1, 1, size=(1,1)).to(self.device))
+        self.gp_params['sex']['sa'] = self.sa_sex
+        self.logstd_sex = torch.nn.Parameter(torch.normal(0, 1, size=(1,1)).to(self.device))
+        self.gp_params['sex']['logstd'] = self.logstd_sex
         # init z_prior --> for VAE latents
         mean = torch.zeros(self.num_latents).to(self.device)
         cov_factor = torch.zeros(self.num_latents).unsqueeze(-1).to(self.device)
@@ -301,7 +306,7 @@ class VAE(nn.Module):
 
     def forward(self, ids, covariates, x, log_type, return_latent_rec=False, train_mode=True):
         imgs = {'base': {}, 'task': {}, 'x_mot':{}, 'y_mot':{},'z_mot':{}, 'pitch_mot':{},\
-        'roll_mot':{}, 'yaw_mot':{},'full_rec': {}}
+        'roll_mot':{}, 'yaw_mot':{}, 'sex':{}, 'full_rec': {}}
         imgs_keys = list(imgs.keys())
         gp_params_keys = list(self.gp_params.keys())
         #set batch gp_kl_loss to zero
@@ -342,8 +347,9 @@ class VAE(nn.Module):
             self.gp_params[gp_params_keys[i-1]]['logstd'][0].exp())
             gp_kl_loss += gp_linW_kl
             beta_mean = self.gp_params[gp_params_keys[i-1]]['sa'][0] * xq
-            beta_cov = torch.pow(self.gp_params[gp_params_keys[i-1]]['logstd'][0].exp(), 2)* torch.pow(xq, 2) * torch.eye(ids.shape[0]).to(self.device)
-            if i!=1:
+            beta_cov = torch.pow(self.gp_params[gp_params_keys[i-1]]['logstd'][0].exp(), 2)* \
+            torch.pow(xq, 2) * torch.eye(ids.shape[0]).to(self.device)
+            if i>1 and i<8: #exclude task and sex (binary)
                 #get params for non-linear (GP) piece of gain
                 Xu = self.gp_params[gp_params_keys[i-1]]['xu']
                 kvar = (self.gp_params[gp_params_keys[i-1]]['logkvar']).exp() + 0.1
@@ -368,7 +374,7 @@ class VAE(nn.Module):
             #this set up assumes motion covariates come last and all covariates before that are either
             # 1) biological when neural_covariates==True OR
             # 2) synthetic when neural_covariates==False
-            if self.neural_covariates==True and i<(self.num_covariates-5):
+            if self.neural_covariates==True and i<(self.num_covariates-6):
                 task_var = self.do_hrf_conv(task_var)
             #use result to scale effect map.
             cons = torch.einsum('b,bx->bx', task_var, diff)
@@ -528,6 +534,9 @@ class VAE(nn.Module):
         self.qu_S_zrot = checkpoint['gp_params']['zrot']['qu_S']
         self.logkvar_zrot = checkpoint['gp_params']['zrot']['logkvar']
         self.logls_zrot = checkpoint['gp_params']['zrot']['log_ls']
+        #sex
+        self.sa_sex = checkpoint['gp_params']['sex']['sa']
+        self.logstd_sex = checkpoint['gp_params']['sex']['logstd']
 
 
     def project_latent(self, loaders_dict, save_dir, title=None, split=98):
@@ -634,7 +643,7 @@ class VAE(nn.Module):
         all_covariates = all_covariates.to_numpy()
         all_covariates = torch.from_numpy(all_covariates)
         regressors = list(self.gp_params.keys())
-        for i in range(1, len(regressors)):
+        for i in range(1, len(regressors)-1): #skip task and sex covariates (binary)
             curr_cov = {};
             #build GP for the regressor
             xu = self.gp_params[regressors[i]]['xu']

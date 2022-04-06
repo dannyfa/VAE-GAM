@@ -21,6 +21,8 @@ parser.add_argument('--output_dir', type=str, metavar='N', default='', \
 help='Output where resulting .csv file with beta maps should be written to.')
 parser.add_argument('--data_dims', type=int, metavar='N', default='', nargs='+', \
 help='Dimensions for fMRI data being processed. Should be in order x, y, z, time.')
+parser.add_argument('--sex_covars_map', type=str, metavar='N', default='', \
+help='Full path to sex covariate cope map produced in higher level analysis in FSL.')
 
 args = parser.parse_args()
 
@@ -93,8 +95,13 @@ pseudo_inv = np.linalg.inv(np.matmul(gamma.T, gamma))
 pseudo_inv = np.matmul(pseudo_inv, gamma.T)
 beta_maps = np.matmul(pseudo_inv, filtered_data.T)
 
+#add sex covariate to our beta_maps
+sex_map = np.array(nib.load(args.sex_covars_map).dataobj)
+sex_map = np.expand_dims(sex_map.flatten(), axis=0)
+beta_maps = np.concatenate([beta_maps, sex_map], axis=0)
+
 #scale these maps (max scaling)
 scld_beta_maps = utils.scale_beta_maps(beta_maps)
 #and save them
-beta_maps_df = pd.DataFrame(scld_beta_maps.T, columns = ['task', 'x', 'y', 'z', 'xrot', 'yrot', 'zrot'])
+beta_maps_df = pd.DataFrame(scld_beta_maps.T, columns = ['task', 'x', 'y', 'z', 'xrot', 'yrot', 'zrot', 'sex'])
 beta_maps_df.to_csv(os.path.join(args.output_dir, 'scld_GLM_beta_maps.csv'))

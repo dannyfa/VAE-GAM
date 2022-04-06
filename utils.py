@@ -316,6 +316,12 @@ def log_qkappa_plots(gp_params, writer, log_type):
     zrot_gauss = norm(sa_zrot[0], scale = std_zrot[0])
     x_zrot = np.linspace(zrot_gauss.ppf(0.01), zrot_gauss.ppf(0.99), 100)
     y_zrot = zrot_gauss.pdf(x_zrot)
+    #sex
+    sa_sex = gp_params['sex']['sa'].detach().cpu().numpy().reshape(1)
+    std_sex = np.exp(gp_params['sex']['logstd'].detach().cpu().numpy())
+    sex_gauss = norm(sa_sex[0], scale = std_sex[0])
+    x_sex = np.linspace(sex_gauss.ppf(0.01), sex_gauss.ppf(0.99), 100)
+    y_sex = sex_gauss.pdf(x_sex)
 
     #now create plot
     fig, axs = plt.subplots(3,3, figsize=(15, 15))
@@ -333,6 +339,8 @@ def log_qkappa_plots(gp_params, writer, log_type):
     axs[1,2].set_title('Yrot q(k)')
     axs[2,0].plot(x_zrot, y_zrot, lw=2, alpha = 0.5, color = 'purple')
     axs[2,0].set_title('Zrot q(k)')
+    axs[2,1].plot(x_sex, y_sex, lw=2, alpha = 0.5, color = 'cyan')
+    axs[2,1].set_title('Sex q(k)')
     #pass it to TB writer
     writer.add_figure("q(k)_{}".format(log_type), fig)
 

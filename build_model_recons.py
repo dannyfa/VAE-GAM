@@ -63,9 +63,11 @@ def mk_avg_maps(csv_file, model, save_dir, mk_motion_maps = False):
     subjs = dset.subjid.unique().tolist()
     #mk a list of regressors
     maps = ['base', 'task', 'full_rec', 'x_mot', 'y_mot', \
-    'z_mot', 'pitch_mot', 'roll_mot', 'yaw_mot']
+    'z_mot', 'pitch_mot', 'roll_mot', 'yaw_mot', 'sex']
     if not mk_motion_maps:
-        maps = maps[0:3]
+        #exclude only mot maps here
+        idxs = [0, 1, 2, 9]
+        maps = [maps[i] for i in idxs]
     #create dict to hold grand avg maps
     gd_avg_maps = {}
     for l in maps:
