@@ -1,13 +1,18 @@
 """
-Short script to resample EMERALD data preprocessed functional imgs
+Short script to resample reg maps constructed for EMERALD data analysis
 into shape needed for VAE-GAM network.
 
-In future, I might simply change network sizes if this makes a difference - tbs.
+Again am making this script separate and really NOT optimal for sake of being able to use afni
+only in the LaBar server (instead of installing it in lab machines).
 
-Am leaving this as a separate script b/c this makes it easier to run it separately in the LaBar server.
+Might be worth just installing afni and being happy about it later on...
+
 """
 import os
 import subprocess
+import pandas as pd
+import nibabel as nib
+import numpy as np
 
 ###############################
 #Helpers for 3D resampling step
@@ -79,32 +84,40 @@ def resampling(input_image, reference, output_image=None, overwrite = 0, skip = 
     return output_image
 
 
-#start logs for good and failed runs
-good_subjs = []
-failed_subjs = []
+#read input file w/ scaled maps and write these to Nifti's
+#then rsample -- will output nifti's again
+#read these back and put them into desired csv format
+csv_input = ''
+rsampling_ref = "/mnt/keoki/experiments2/Rachael/data/emo_class/fmri_data/subject201films_20110509_12861/subject201films_all_runs.nii"
+rsampling_ref_dims = [41, 49, 35]
+orig_ref_path = ''
+orig_ref = nib.load(orig_ref_path)
+orig_img_shape = [91, 109, 91] #3D shape for orig data
+output_root = ''
 
-#specify subs and runs to apply rsampling to
-#these should be args in future
-subs_to_run = ['0001', '0036', '0071', '0162', '0174', '0179', '0038', '0088', '0126', '0155', '0184', '0187']
-runs_to_run = ['1', '2', '3', '4']
+reg_maps = pd.read_csv(csv_input).to_numpy() #might need additional deets
 
-#def general path name/root
-#and ref nifti for resampling
-#these will also be args in the future
-gen_input_path = '/mnt/keoki/experiments2/VAE_GAM/Data/EMERALD_cohort/fmriprep/sub-EM{s}/func/sub-EM{s}_emoreg_run{r}_preproc_short_tempfilt_smooth_brain.nii.gz'
-ref = "/mnt/keoki/experiments2/Rachael/data/emo_class/fmri_data/subject201films_20110509_12861/subject201films_all_runs.nii"
+rsampled_maps = []
 
-for sub in subs_to_run:
-    for run in runs_to_run:
-        sub_run_input_img = gen_input_path.format(s=sub, r=run)
-        try:
-            rsampled_img = resampling(sub_run_input_img, ref, output_image = None)
-            if rsampled_img is None:
-                raise RuntimeError('Resampling')
-            good_subjs.append([sub, run])
-        except Exception as ex:
-            failed_subjs.append([sub, run, ex])
+for i in range(reg_maps.shape[0]):
+    #save original file to nifti -- so that afni can read it
+    reg_map = reg_maps[i, :].reshape(orig_img_shape[0], orig_img_shape[1], orig_img_shape[2])
+    nifti_img = nib.Nifti1Image(avg_map, orig_ref.affine, orig_ref.header)
+    out_path = os.path.join(output_root, 'reg_map_{}.nii'.format(i))
+    nib.save(nifti_img, out_path)
 
-print('---------------------------')
-print('Good subjs: {}'.format(good_subjs))
-print('Bad subjs: {}'.format(failed_subjs))
+    #do rsampling step
+    rsampled_img = resampling(out_path, rsampling_ref, output_image=None)
+
+    #read file again
+    #and concatenate it appropriately
+    rsampled_map = np.array(nib.load((out_path[:-4] + '_rsampled.nii')).dataobj)
+    rsampled_maps.append(rsampled_map.reshape(-1, rsampling_ref_dims[0]*rsampling_ref_dims[1]*rsampling_ref_dims[2]))
+rsampled_maps = np.concatenate(rsampled_maps, axis=0)
+
+#write final rsampled csv
+#this is what we will feed into model ultimately
+#might be worth checking if these are still scaled after rsampling procedure ??
+#if scaling seems messed up -- do it after rsampling
+rsampled_beta_maps_df = pd.DataFrame(rsampled_maps.T, columns = ['flow', 'reappraisal', 'distancing', 'x', 'y', 'z', 'xrot', 'yrot', 'zrot', 'sex'])
+sampled_beta_maps_df.to_csv(os.path.join(output_root, 'rsampled_scld_GLM_beta_maps.csv'))
