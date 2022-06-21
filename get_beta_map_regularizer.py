@@ -61,7 +61,7 @@ else:
         pass
 
 #first find all subjs
-RE = re.compile('\Asub-EM0*') #test this regex
+RE = re.compile('\Asub-EM0*')
 dirs = os.listdir(args.root_dir)
 subjs = []
 for i in range(len(dirs)):
@@ -82,22 +82,20 @@ for i in range(len(subjs)):
 
 #mk sure subj keys have .feat dirs for 4 runs
 for key in list(feat_dirs.keys()):
-    assert len(feat_dirs[key])==4, '{} does not have correct # .feat directories. Expected 4 dirs but found {}'.format(key, len(feat_dirs[key]))
+    assert len(feat_dirs[key])==4, \
+    '{} does not have correct # .feat directories. Expected 4 dirs but found {}'.format(key, len(feat_dirs[key]))
 
 
 #get individual subj maps
 #and avg them
 all_subj_OLS_maps = []
 for i in range(len(subjs)):
-    subj_filt_data = utils.get_all_runs_data(feat_dirs, i)
-    subj_dms = utils.get_all_runs_dms(feat_dirs, i)
+    subj_filt_data = utils.get_all_runs_data(feat_dirs, i, data_dims)
+    subj_dms = utils.get_all_runs_dms(feat_dirs, i, data_dims)
     subj_OLS_sln = utils.get_OLS_sln(subj_dms, subj_filt_data)
     all_subj_OLS_maps.append(subj_OLS_sln)
 all_subj_OLS_maps = np.array(all_subj_OLS_maps)
-print(all_subj_OLS_maps.shape)
 avg_OLS_maps = np.mean(all_subj_OLS_maps, axis=0)
-print(avg_OLS_maps.shape)
-
 
 #add sex covariate to our beta_maps
 #this probably won't change MUCH but am leaving it commented for now.
@@ -108,5 +106,5 @@ print(avg_OLS_maps.shape)
 #now scale these out
 scld_maps = utils.scale_beta_maps(avg_OLS_maps)
 #and save them
-beta_maps_df = pd.DataFrame(scld_maps.T, columns = ['flow', 'reappraisal', 'distancing', 'x', 'y', 'z', 'xrot', 'yrot', 'zrot', 'sex'])
+beta_maps_df = pd.DataFrame(scld_maps.T, columns = ['flow', 'reappraisal', 'distancing'])
 beta_maps_df.to_csv(os.path.join(args.output_dir, 'scld_GLM_beta_maps.csv'))

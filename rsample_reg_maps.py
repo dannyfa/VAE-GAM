@@ -32,7 +32,7 @@ def resampling(input_image, reference, output_image=None, overwrite = 0, skip = 
     try:
         #Check the input file for a path
         input_path, input_file = os.path.split(input_image)
-        if input_path is '':
+        if input_path == '':
             print('input_image must contain a full path to the image file!')
             raise RuntimeError()
 
@@ -87,37 +87,35 @@ def resampling(input_image, reference, output_image=None, overwrite = 0, skip = 
 #read input file w/ scaled maps and write these to Nifti's
 #then rsample -- will output nifti's again
 #read these back and put them into desired csv format
-csv_input = ''
+csv_input = '/mnt/keoki/experiments2/VAE_GAM/Data/EMERALD_cohort/EMERALD_test_06162022/scld_GLM_beta_maps.csv'
 rsampling_ref = "/mnt/keoki/experiments2/Rachael/data/emo_class/fmri_data/subject201films_20110509_12861/subject201films_all_runs.nii"
 rsampling_ref_dims = [41, 49, 35]
-orig_ref_path = ''
+orig_ref_path = '/mnt/keoki/experiments2/VAE_GAM/Data/EMERALD_cohort/Analysis/TRAIN_set/sub-EM0001/First_level_run1.feat/filtered_func_data.nii.gz'
 orig_ref = nib.load(orig_ref_path)
 orig_img_shape = [91, 109, 91] #3D shape for orig data
-output_root = ''
+output_root = '/mnt/keoki/experiments2/VAE_GAM/Data/EMERALD_cohort/EMERALD_test_06162022/'
 
-reg_maps = pd.read_csv(csv_input).to_numpy() #might need additional deets
+reg_maps = pd.read_csv(csv_input, index_col=False).to_numpy()
 
 rsampled_maps = []
 
-for i in range(reg_maps.shape[0]):
+for i in range(1, reg_maps.shape[1]):
     #save original file to nifti -- so that afni can read it
-    reg_map = reg_maps[i, :].reshape(orig_img_shape[0], orig_img_shape[1], orig_img_shape[2])
-    nifti_img = nib.Nifti1Image(avg_map, orig_ref.affine, orig_ref.header)
-    out_path = os.path.join(output_root, 'reg_map_{}.nii'.format(i))
+    reg_map = np.squeeze(reg_maps[:, i].reshape(-1, orig_img_shape[0], orig_img_shape[1], orig_img_shape[2]))
+    nifti_img = nib.Nifti1Image(reg_map, orig_ref.affine, orig_ref.header)
+    out_path = os.path.join(output_root, 'reg_map_{}.nii.gz'.format(i))
     nib.save(nifti_img, out_path)
 
     #do rsampling step
-    rsampled_img = resampling(out_path, rsampling_ref, output_image=None)
+    rsampled_img = resampling(out_path, rsampling_ref, output_image=None, overwrite=1)
 
     #read file again
     #and concatenate it appropriately
-    rsampled_map = np.array(nib.load((out_path[:-4] + '_rsampled.nii')).dataobj)
+    rsampled_map = np.array(nib.load((out_path[:-7] + '_rsampled.nii.gz')).dataobj)
     rsampled_maps.append(rsampled_map.reshape(-1, rsampling_ref_dims[0]*rsampling_ref_dims[1]*rsampling_ref_dims[2]))
 rsampled_maps = np.concatenate(rsampled_maps, axis=0)
 
 #write final rsampled csv
 #this is what we will feed into model ultimately
-#might be worth checking if these are still scaled after rsampling procedure ??
-#if scaling seems messed up -- do it after rsampling
-rsampled_beta_maps_df = pd.DataFrame(rsampled_maps.T, columns = ['flow', 'reappraisal', 'distancing', 'x', 'y', 'z', 'xrot', 'yrot', 'zrot', 'sex'])
-sampled_beta_maps_df.to_csv(os.path.join(output_root, 'rsampled_scld_GLM_beta_maps.csv'))
+rsampled_beta_maps_df = pd.DataFrame(rsampled_maps.T, columns = ['flow', 'reappraisal', 'distancing'])
+rsampled_beta_maps_df.to_csv(os.path.join(output_root, 'rsampled_scld_GLM_beta_maps.csv'))

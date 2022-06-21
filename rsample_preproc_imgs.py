@@ -6,6 +6,7 @@ In future, I might simply change network sizes if this makes a difference - tbs.
 
 Am leaving this as a separate script b/c this makes it easier to run it separately in the LaBar server.
 """
+
 import os
 import subprocess
 
@@ -22,7 +23,7 @@ def __add_prefix(input_file, prefix):
 
 def resampling(input_image, reference, output_image=None, overwrite = 0, skip = 0):
     #This function will apply a resampling opp to preprocessed fMRI data
-    #essentially this is a wrapper for afni's rsampling function.
+    #essentially this is a wrapper for afni's 3dresample function.
     print('-------Starting: Resampling-------')
     try:
         #Check the input file for a path
@@ -85,20 +86,20 @@ failed_subjs = []
 
 #specify subs and runs to apply rsampling to
 #these should be args in future
-subs_to_run = ['0001', '0036', '0071', '0162', '0174', '0179', '0038', '0088', '0126', '0155', '0184', '0187']
+subs_to_run = ['0187']
 runs_to_run = ['1', '2', '3', '4']
 
 #def general path name/root
 #and ref nifti for resampling
 #these will also be args in the future
-gen_input_path = '/mnt/keoki/experiments2/VAE_GAM/Data/EMERALD_cohort/fmriprep/sub-EM{s}/func/sub-EM{s}_emoreg_run{r}_preproc_short_tempfilt_smooth_brain.nii.gz'
+gen_input_path = '/mnt/keoki/experiments2/VAE_GAM/Data/EMERALD_cohort/fmriprep/TEST_set/sub-EM{s}/func/sub-EM{s}_emoreg_run{r}_preproc_short_tempfilt_smooth_brain.nii.gz'
 ref = "/mnt/keoki/experiments2/Rachael/data/emo_class/fmri_data/subject201films_20110509_12861/subject201films_all_runs.nii"
 
 for sub in subs_to_run:
     for run in runs_to_run:
         sub_run_input_img = gen_input_path.format(s=sub, r=run)
         try:
-            rsampled_img = resampling(sub_run_input_img, ref, output_image = None)
+            rsampled_img = resampling(sub_run_input_img, ref, output_image = None, overwrite=1)
             if rsampled_img is None:
                 raise RuntimeError('Resampling')
             good_subjs.append([sub, run])
