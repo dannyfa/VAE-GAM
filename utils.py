@@ -404,6 +404,9 @@ def scale_beta_maps(beta_maps):
         beta_maps[i, :] = beta_maps[i, :]/map_max
     return beta_maps
 
+############
+#for original/averaging version of OLS
+############
 def get_all_runs_data(feat_dirs, subj_idx, data_dims, num_runs=4):
     """
     Constructs array containing filtered data for all runs for a given subj.
@@ -459,3 +462,44 @@ def get_OLS_sln(gamma, filtered_data):
     pseudo_inv = np.matmul(pseudo_inv, gamma.T)
     beta_maps = np.matmul(pseudo_inv, filtered_data.T)
     return beta_maps
+
+#############
+#streaming OLS implementation
+############
+def streaming_OLS(feat_dirs, data_dims):
+    """
+    Takes each run from each subj and computes a running
+    OLS estimate for the 3 contrasts/beta maps we are interested
+    in for the EMERALD data.
+    Arg:
+    feat_dirs: dict with keys being subj IDs and entries being
+    list of run .feat directories for a given subj.
+    """
+    subjs = list(feat_dirs.keys())
+    flat_vol_dims = data_dims[0]*data_dims[1]*data_dims[2]
+    #am assuming we have already checked and all subjs do INDEED have
+    #same number of runs
+    run_count = len(feat_dirs[subjs[0]])
+    for s in range(len(subjs)):
+        for r in range(run_count):
+            #get dm and data for run
+            run_path = feat_dirs[subjs[s]][r]
+            run_dm_path = os.path.join(run_path, 'design.mat')
+            run_filtdata_path = os.path.join(run_path, 'filtered_func_data.nii.gz')
+            run_dm = read_design_mat(run_dm_path)[:, 0:3].reshape((-1, 3))
+            run_filtdata = np.array(nib.load(run_filtdata_path).dataobj).reshape(flat_vol_dims, -1)
+            #get prods we want (for single run)
+            xxT = run_dm.T@run_dm #should be a 3x3
+            xy = (run_dm.T)@run_filtdata.T #should be 3x(91*109*91)
+            if s==0 and r==0:
+                #initialize grand products (to be updated as we see data)
+                grand_xxT = xxT
+                grand_xy = xy
+            else:
+                #otherwise, just update these
+                grand_xxT += xxT
+                grand_xy += xy
+    #use updated/accumulated prods to get OLS sln for entire streamed data
+    OLS_sln = np.linalg.inv(grand_xxT)@grand_xy
+    #return final OLS sln (over entire dset)
+    return OLS_sln

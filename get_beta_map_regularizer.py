@@ -86,16 +86,7 @@ for key in list(feat_dirs.keys()):
     '{} does not have correct # .feat directories. Expected 4 dirs but found {}'.format(key, len(feat_dirs[key]))
 
 
-#get individual subj maps
-#and avg them
-all_subj_OLS_maps = []
-for i in range(len(subjs)):
-    subj_filt_data = utils.get_all_runs_data(feat_dirs, i, data_dims)
-    subj_dms = utils.get_all_runs_dms(feat_dirs, i, data_dims)
-    subj_OLS_sln = utils.get_OLS_sln(subj_dms, subj_filt_data)
-    all_subj_OLS_maps.append(subj_OLS_sln)
-all_subj_OLS_maps = np.array(all_subj_OLS_maps)
-avg_OLS_maps = np.mean(all_subj_OLS_maps, axis=0)
+OLS_maps = utils.streaming_OLS(feat_dirs, args.data_dims)
 
 #add sex covariate to our beta_maps
 #this probably won't change MUCH but am leaving it commented for now.
@@ -104,7 +95,7 @@ avg_OLS_maps = np.mean(all_subj_OLS_maps, axis=0)
 #beta_maps = np.concatenate([beta_maps, sex_map], axis=0)
 
 #now scale these out
-scld_maps = utils.scale_beta_maps(avg_OLS_maps)
+scld_maps = utils.scale_beta_maps(OLS_maps)
 #and save them
 beta_maps_df = pd.DataFrame(scld_maps.T, columns = ['flow', 'reappraisal', 'distancing'])
 beta_maps_df.to_csv(os.path.join(args.output_dir, 'scld_GLM_beta_maps.csv'))
