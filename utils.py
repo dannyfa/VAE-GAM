@@ -122,9 +122,16 @@ def zscore(df):
     and replaces raw mot regressor inputs by their z-scored vals.
     Z-scoring is done for ALL vols and subjects at once in this case.
     """
+    # mk sure pd warning on SettingWithCopyWarning is off
+    # we do this here on purpose and its ok!
+    pd.options.mode.chained_assignment = None
+
     mot_regrssors = df[['x', 'y', 'z', 'rot_x', 'rot_y', 'rot_z']]
     cols = list(mot_regrssors.columns)
     for col in cols:
+        #mk sure entries as in float....
+        mot_regrssors[col] = mot_regrssors[col].astype('float')
+        #zscore them
         df[col] = (mot_regrssors[col] - mot_regrssors[col].mean())/mot_regrssors[col].std(ddof=0)
     return df
 
@@ -503,3 +510,52 @@ def streaming_OLS(feat_dirs, data_dims):
     OLS_sln = np.linalg.inv(grand_xxT)@grand_xy
     #return final OLS sln (over entire dset)
     return OLS_sln
+
+#################
+#methos to parse run event timing Files
+################
+def parse_run_event_times(event_timing_file, run_num_vols, TR=2, del_vols=4, ITI=0.14):
+    """
+    Parses event timing file for each run so that we have one event label
+    per TR/vol, excluding a pre-determined number of volumes that are
+    deleted at very beginning of scan acquisition.
+    OF NOTE: There are about 4-5 TRs at the end that are NOT account for
+    in timing file! Unsure if this is some std to model delay of BOLD signal
+    or something else...
+    Will talk to ppl at Labar lab about it!
+    ------
+    Args:
+    event_timing_file: str. Path to .tsv file containing timing/event code info
+    for a given run.
+    run_num_vols: number of volumes from run we are actually using
+    (i.e., excluding deleted vols).
+    TR: time of repetition. Per fMRI standards, time it takes for us to acquire
+    one full brain volume.
+    del_vols: number of deleted volumes.
+    ITI: inter trial interval. For EMERALD this is about 0.14s.
+    """
+    event_file = pd.read_csv(event_timing_file, sep='\t')
+    #shift file onsets to account for deleted TRs
+    del_time = TR*del_vols
+    event_file['onset'] = event_file['onset'] - del_time
+    #now parse info
+    parsed_event_times = []
+    idx=0 #this is id for row in event file
+    for v in range(0, run_num_vols-5):
+        #get end time for given vol
+        vol_time = (v+1)*TR
+        #check if we should update idx
+        diff = vol_time - \
+        (event_file.iloc[idx, 0] + event_file.iloc[idx, 1] + ITI)
+        if diff < TR/2.:
+            vol_code = event_file.iloc[idx, 3]
+        else:
+            idx += 1
+            vol_code = event_file.iloc[idx, 3]
+        parsed_event_times.append(vol_code)
+    #add codes for last extra vols collected ...
+    #we might wish/need to change this out
+    #it should not matter for events we care about...
+    parsed_event_times.extend([vol_code]*5)
+    parsed_event_times = np.array(parsed_event_times)
+    return parsed_event_times
